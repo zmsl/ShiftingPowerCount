@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Shifting Power Count
+## Notes: How many Shifting Powers your mana pays for right now (works in combat with secret mana).
+## Author: zmsl
+## Version: 1.0.0
+## SavedVariables: ShiftingPowerCountDB
+
+ShiftingPowerCount.lua
