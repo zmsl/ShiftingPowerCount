@@ -24,7 +24,7 @@ Options > AddOns > Shifting Power Count, or `/spcount` (opens the panel). Every 
 - `/spcount` prints cost, max mana, casts at full and the main options, and opens the panel
 - `/spcount size <0.5-3>`, `fontsize <8-72>`, `alpha <0-1>`
 - `/spcount mode icon|text|bar`
-- `/spcount barcolor mana|energy|rage|focus|runic|themed` (themed: the textured fill greyed and tinted like the frame border), `tickcolor white|black|yellow`, `dark normal|match|dark` (`on|off` = dark|normal), `catonly on|off`, `ticks on|off`, `bartext on|off`
+- `/spcount barcolor mana|energy|rage|focus|runic`, `tickcolor white|black|yellow`, `dark normal|match|dark` (`on|off` = dark|normal), `catonly on|off`, `ticks on|off`, `bartext on|off`
 - `/spcount font frizqt|arialn|morpheus|skurri`, `outline none|outline|thick`, `color white|yellow|green|cyan|orange`, `pos center|below|above`
 - `/spcount zero on|off`
 - `/spcount lock` / `unlock` stops or allows dragging the frame

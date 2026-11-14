@@ -231,22 +231,6 @@ describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
         assert.is_true(bg.hidden)
         assert.is_table(w.settings.controls.barStyle)
     end)
-    it("Bar colour Themed greys the textured fill and tints it from the frame colour, live; plain colours untouched", function()
-        local w = start({ pfArt = true })
-        local frame = w.playerFrame.PlayerFrameContainer.FrameTexture
-        frame:SetDesaturated(true); frame:SetVertexColor(0.2, 0.2, 0.4)
-        slash("mode bar")
-        slash("barcolor themed")
-        local fill = w.bar.fillTex
-        assert.is_true(fill.desat)
-        assert.same({ 0.6, 0.6, 0.7 }, fill.vertex) -- halfway to white
-        frame:SetVertexColor(1, 1, 1) -- the frame changes: the fill follows through the hook
-        assert.same({ 1, 1, 1 }, fill.vertex)
-        slash("barcolor mana")
-        assert.is_false(fill.desat)
-        assert.same({ 1, 1, 1 }, fill.vertex)
-        assert.is_nil(rawget(w.playerFrame, "vertex"))
-    end)
     it("Bar style Match mirrors the visible frame art (DarkMode: desaturate + colour), follows later changes, never writes PlayerFrame", function()
         local w = start({ pfArt = true })
         local alt = w.playerFrame.PlayerFrameContainer.AlternatePowerFrameTexture
