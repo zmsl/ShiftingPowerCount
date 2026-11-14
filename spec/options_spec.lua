@@ -88,6 +88,103 @@ describe("options", function()
     end)
 end)
 
+describe("bar on player frame", function()
+    local function ticksOf(bar)
+        local r = {}
+        for _, t in ipairs(rawget(bar, "textures") or {}) do
+            if rawget(t, "color4") and not rawget(t, "hidden") then r[#r + 1] = t.point[4] end
+        end
+        return r
+    end
+
+    it("mode bar parents and anchors to PlayerFrame one strata below, in the fourth row", function()
+        local w = start({})
+        slash("mode bar")
+        assert.equal(w.playerFrame, w.bar.parent)
+        assert.same({ "TOPLEFT", w.playerFrame, "TOPLEFT", 85, -73 }, w.bar.point)
+        assert.same({ 124, 9 }, w.bar.size)
+        assert.equal("BACKGROUND", w.bar.strata)
+        assert.equal(3, ShiftingPowerCountDB.mode)
+        assert.equal("UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana", w.bar.barTexture)
+        assert.equal("UI-HUD-UnitFrame-Player-PortraitOn-ClassResource", w.bar.textures[1].atlas)
+        assert.same({ "CENTER", w.playerFrame, "CENTER", 0, -1.5 }, w.bar.textures[1].point)
+    end)
+    it("the floating frame goes invisible and the labels move onto the bar", function()
+        local w = start({})
+        slash("mode bar")
+        assert.equal(0, w.frame.alpha)
+        for _, fs in ipairs(w.fs) do
+            assert.equal(w.bar, fs.parent)
+            assert.same({ "CENTER", w.bar, "CENTER", 0, 0 }, fs.point)
+        end
+        slash("mode icon")
+        assert.equal(1, w.frame.alpha)
+        assert.is_true(w.bar.hidden)
+        assert.equal(w.frame, w.fs[1].parent)
+    end)
+    it("ticks sit at every multiple of the cost, 124 wide", function()
+        local w = start({ cost = 400, max = 2000 })
+        slash("mode bar")
+        local got = ticksOf(w.bar) -- 400/2000 of 124 each, none at the far end
+        assert.equal(4, #got)
+        for i, want in ipairs({ 24.8, 49.6, 74.4, 99.2 }) do assert.is_true(math.abs(got[i] - want) < 1e-9) end
+        slash("ticks off")
+        assert.same({}, ticksOf(w.bar))
+        slash("ticks on")
+        assert.equal(4, #ticksOf(w.bar))
+        assert.equal(2000, w.bar.max)
+    end)
+    it("SetValue receives the secret and the min/max the plain max", function()
+        local w = start({ mana = F.SECRET })
+        slash("mode bar")
+        assert.has_no.errors(function() w.combat = true; F.tick() end)
+        assert.equal(F.SECRET, w.bar.value)
+        assert.same({ 0, 2000 }, { w.bar.min, w.bar.max })
+    end)
+    it("falls back to the floating frame, once in chat, when PlayerFrame is missing or hidden", function()
+        local w = start({ noPlayerFrame = true })
+        slash("mode bar")
+        assert.is_nil(w.bar)
+        assert.equal(1, w.frame.alpha)
+        assert.matches("floating frame", w.printed)
+        w.printed = nil
+        slash("mode bar")
+        assert.is_nil(w.printed) -- said once
+        local w2 = F.install({})
+        F.fire("PLAYER_LOGIN")
+        w2.pfShown = false
+        slash("mode bar")
+        assert.is_nil(w2.bar)
+        assert.equal(1, w2.frame.alpha)
+    end)
+    it("a mode switch in combat waits for PLAYER_REGEN_ENABLED, other options still apply live", function()
+        local w = start({})
+        w.combat = true
+        slash("mode bar")
+        assert.is_nil(w.bar)
+        assert.is_not.equal(0, w.frame.alpha) -- still the floating frame
+        assert.equal(3, ShiftingPowerCountDB.mode)
+        slash("fontsize 30")
+        assert.equal(30, w.fs[1].font[2])
+        w.combat = false
+        F.fire("PLAYER_REGEN_ENABLED")
+        assert.equal(w.playerFrame, w.bar.parent)
+        assert.equal(0, w.frame.alpha)
+        assert.equal(12, w.fs[1].font[2]) -- clamped to the 9px row
+    end)
+    it("bar colour, count text and settings panel entries", function()
+        local w = start({})
+        slash("mode bar"); slash("barcolor energy")
+        assert.equal("UI-HUD-UnitFrame-Player-PortraitOn-Bar-Energy", w.bar.barTexture)
+        slash("bartext off")
+        assert.is_true(w.fs[1].hidden)
+        w.settings.settings.barText:SetValue(true)
+        assert.is_false(w.fs[1].hidden)
+        for _, k in ipairs({ "barColor", "ticks", "barText" }) do assert.is_table(w.settings.controls[k], k) end
+        assert.equal(3, #w.settings.controls.mode.opts)
+    end)
+end)
+
 describe("number boxes", function()
     -- Mimics a pooled SettingsSliderControlTemplate row: the slider routes its value into the setting.
     local function row(w, key)

@@ -22,15 +22,45 @@ function F.install(o)
         function t.SetTexture(s, x) s.texture = x; w.texture = x end
         function t.SetShown(s, v) s.shown = v; w.shown[#w.shown + 1] = v end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
-        function t.CreateTexture() w.icon = obj(); return w.icon end
+        function t.CreateTexture(s)
+            local tx = obj()
+            w.icon = w.icon or tx -- the floating frame's icon is the first texture created
+            if not rawget(s, "textures") then s.textures = {} end
+            s.textures[#s.textures + 1] = tx
+            return tx
+        end
+        function t.SetColorTexture(s, ...) s.color4 = { ... } end
+        function t.SetSize(s, a, b) s.size = { a, b } end
+        function t.CreateMaskTexture() return obj() end
+        function t.SetAtlas(s, name) s.atlas = name end
+        function t.SetStatusBarTexture(s, x) s.barTexture = x end
+        function t.SetMinMaxValues(s, a, b) s.min, s.max = a, b end
+        function t.SetValue(s, v) s.value = v; s.values = (rawget(s, "values") or 0) + 1 end
+        function t.SetFrameStrata(s, x) s.strata = x end
+        function t.GetFrameStrata(s) return rawget(s, "strata") or "LOW" end
+        function t.SetParent(s, p) s.parent = p end
         function t.GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
         return setmetatable(t, { __index = function() return function() end end }) -- other widget methods: no-ops
     end
     w.boxes = {}
-    _G.CreateFrame = function(kind)
-        local o = obj()
-        if kind == "EditBox" then w.boxes[#w.boxes + 1] = o else w.frame = o end
-        return o
+    _G.CreateFrame = function(kind, _, parent)
+        local fr = obj()
+        fr.parent = parent
+        if kind == "EditBox" then w.boxes[#w.boxes + 1] = fr
+        elseif kind == "StatusBar" then w.bar = fr
+        else w.frame = fr end
+        return fr
+    end
+    -- Stub of Blizzard's PlayerFrame: a shown Button in strata LOW with its container child.
+    if o.noPlayerFrame then
+        _G.PlayerFrame = nil
+    else
+        local pf = obj()
+        pf.PlayerFrameContainer = {}
+        pf.strata = "LOW"
+        function pf.IsShown() return w.pfShown ~= false end
+        _G.PlayerFrame = pf
+        w.playerFrame = pf
     end
     _G.UIParent = {}
     -- Fake Settings API: records registrations; an addon setting writes its table and calls the callback on SetValue.

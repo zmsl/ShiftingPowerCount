@@ -12,9 +12,13 @@ local isSecret = issecretvalue or function() return false end
 
 -- Options live in ShiftingPowerCountDB (defaults filled at login). Choice options store an index into CHOICES.
 local DEFAULTS = { mode = 1, scale = 1, iconAlpha = 0.35, zeroRed = true, locked = false,
-    fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1 }
+    fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1, ticks = true, barColor = 1, barText = true }
+local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
-    mode = { { "icon", "Icon and number" }, { "text", "Number only" } },
+    mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar on player frame" } },
+    barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana" }, { "energy", "Energy", BAR_ATLAS .. "Energy" },
+        { "rage", "Rage", BAR_ATLAS .. "Rage" }, { "focus", "Focus", BAR_ATLAS .. "Focus" },
+        { "runic", "Runic power", BAR_ATLAS .. "RunicPower" } },
     font = { { "frizqt", "Friz Quadrata", "Fonts\\FRIZQT__.TTF" }, { "arialn", "Arial Narrow", "Fonts\\ARIALN.TTF" },
         { "morpheus", "Morpheus", "Fonts\\MORPHEUS.ttf" }, { "skurri", "Skurri", "Fonts\\skurri.ttf" } },
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
@@ -22,7 +26,8 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
         { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
     textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
 }
-local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos" }
+local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor" }
+local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
 local settingObjs, category = {}, nil
 local InitSettings
@@ -48,23 +53,128 @@ icon:SetAllPoints()
 local labels, curves = {}, {}
 local cost, maxMana, n = 0, 0, -1 -- UnitPowerPercent's input to the curve is 0..1 (Blizzard CurveConstants.ScaleTo100)
 
--- Every label gets the same font, outline and anchor; only the colour of "0" can differ.
-local function Style(fs, k)
-    fs:SetFont(Choice("font")[3], Opt("fontSize"), Choice("outline")[3])
+-- Bar mode: a StatusBar child of PlayerFrame, one strata below it, in the fourth row of the unit frame. Geometry is
+-- Blizzard's own alternate power bar row (Blizzard_UnitFrame PlayerFrame.xml / AlternatePowerBarBase.xml, Forever):
+-- 124x9 at TOPLEFT (85,-73) of PlayerFrame, mask atlas anchored (-2,3), and the extended frame art
+-- "UI-HUD-UnitFrame-Player-PortraitOn-ClassResource" centred at (0,-1.5) (what PlayerFrame shows for that fourth row).
+-- Our copy of that art sits below PlayerFrame's own art, so the ring tucks over its left end.
+local BAR_W, BAR_H, BAR_X, BAR_Y = 124, 9, 85, -73
+local BAR_FONT_MAX = 12 -- a 9px row cannot hold a bigger number
+local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+local bar, ticks = nil, {}
+local barOn = false -- the display actually realised (mode asked for AND PlayerFrame usable)
+local pendingLayout, warned, isKnown = false, false, false
+
+local function Style(fs, k) -- every label gets the same font, outline and anchor; only the colour of "0" can differ
+    local size = Opt("fontSize")
+    if barOn then size = math.min(size, BAR_FONT_MAX) end
+    fs:SetFont(Choice("font")[3], size, Choice("outline")[3])
     local c = (k == 0 and Opt("zeroRed")) and { 1, 0.2, 0.2 } or Choice("color")[3]
     fs:SetTextColor(c[1], c[2], c[3])
     local pos = Opt("textPos")
+    fs:SetParent(barOn and bar or f)
     fs:ClearAllPoints()
-    if pos == 2 then fs:SetPoint("TOP", f, "BOTTOM", 0, -2)
-    elseif pos == 3 then fs:SetPoint("BOTTOM", f, "TOP", 0, 2)
-    else fs:SetPoint("CENTER") end
+    if barOn then
+        fs:SetPoint("CENTER", bar, "CENTER", 0, 0)
+        if Opt("barText") then fs:Show() else fs:Hide() end
+    else
+        fs:Show()
+        if pos == 2 then fs:SetPoint("TOP", f, "BOTTOM", 0, -2)
+        elseif pos == 3 then fs:SetPoint("BOTTOM", f, "TOP", 0, 2)
+        else fs:SetPoint("CENTER") end
+    end
 end
 
--- Safe in combat: plain values on our own non-secure frame (scale, alpha, font, anchors); no SetShown.
+local function LayoutTicks() -- one tick per Shifting Power cost: the segments are casts. Plain out-of-combat numbers.
+    if not bar then return end
+    local show = Opt("ticks") and cost > 0 and maxMana > 0
+    for i = 1, MAX_LABELS do
+        local x = show and (i * cost / maxMana * BAR_W) -- only divides when show (maxMana > 0)
+        local t = ticks[i]
+        if x and x < BAR_W - 0.5 then
+            if not t then
+                t = bar:CreateTexture(nil, "OVERLAY")
+                t:SetColorTexture(0, 0, 0, 0.8)
+                t:SetSize(1, BAR_H)
+                ticks[i] = t
+            end
+            t:ClearAllPoints()
+            t:SetPoint("LEFT", bar, "LEFT", x, 0)
+            t:Show()
+        elseif t then
+            t:Hide()
+        end
+    end
+end
+
+local function BarVisuals()
+    bar:SetStatusBarTexture(Choice("barColor")[3])
+    LayoutTicks()
+end
+
+local function MakeBar(pf)
+    bar = CreateFrame("StatusBar", "ShiftingPowerCountBar", pf)
+    bar:SetSize(BAR_W, BAR_H)
+    bar:SetPoint("TOPLEFT", pf, "TOPLEFT", BAR_X, BAR_Y)
+    bar:SetMinMaxValues(0, math.max(maxMana, 1))
+    bar:SetValue(0)
+    local art = bar:CreateTexture(nil, "BACKGROUND") -- the frame art with the extra row, under PlayerFrame's own art
+    art:SetAtlas("UI-HUD-UnitFrame-Player-PortraitOn-ClassResource", true)
+    art:SetPoint("CENTER", pf, "CENTER", 0, -1.5)
+    BarVisuals()
+    local tex, mask = bar:GetStatusBarTexture(), bar:CreateMaskTexture()
+    mask:SetAtlas("UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana-Mask", true)
+    mask:SetPoint("TOPLEFT", bar, "TOPLEFT", -2, 3)
+    if tex then tex:SetTexelSnappingBias(0); tex:SetSnapToPixelGrid(false); tex:AddMaskTexture(mask) end
+end
+
+local function PlayerFrameUsable()
+    local pf = _G.PlayerFrame
+    return pf ~= nil and pf.PlayerFrameContainer ~= nil and pf:IsShown() and pf or nil
+end
+
+local function Restyle() for k, fs in pairs(labels) do Style(fs, k) end end
+
+-- Out of combat only (anchor and strata): realise the display mode. A floating frame stays up as the fallback when
+-- PlayerFrame is hidden or replaced (another unit-frame addon): say so once.
+local function Layout()
+    local pf = Opt("mode") == 3 and PlayerFrameUsable() or nil
+    if Opt("mode") == 3 and not pf and not warned then
+        warned = true
+        print("Shifting Power Count: PlayerFrame is not available (hidden or replaced), showing the floating frame instead.")
+    end
+    barOn = pf ~= nil
+    if barOn then
+        if not bar then MakeBar(pf) end
+        local at = 2
+        for i, s in ipairs(STRATA) do if s == pf:GetFrameStrata() then at = i end end
+        bar:SetFrameStrata(STRATA[math.max(1, at - 1)]) -- one below PlayerFrame
+        bar:SetShown(isKnown)
+        f:SetAlpha(0) -- stays "shown" so its OnUpdate keeps ticking; labels live on the bar
+        f:EnableMouse(false)
+    else
+        if bar then bar:Hide() end
+        f:SetAlpha(1)
+        f:EnableMouse(true)
+    end
+    Restyle()
+end
+
+-- Safe in combat: plain values on our own non-secure frames. Only a mode switch (anchor/strata/parent) waits for
+-- PLAYER_REGEN_ENABLED.
 local function Apply()
     f:SetScale(Opt("scale"))
     icon:SetAlpha(Opt("mode") == 1 and Opt("iconAlpha") or 0)
-    for k, fs in pairs(labels) do Style(fs, k) end
+    if bar then BarVisuals() end
+    if (Opt("mode") == 3) ~= barOn then
+        if InCombatLockdown() then
+            if not pendingLayout then print("Shifting Power Count: the display mode changes when combat ends.") end
+            pendingLayout = true
+        else
+            Layout()
+        end
+    end
+    Restyle() -- font, colour, text visibility: live even while a mode switch is pending
 end
 
 local function Label(k)
@@ -85,7 +195,9 @@ end
 local function Rebuild()
     if InCombatLockdown() then return end
     local known = C_SpellBook.IsSpellKnown(SPELL) == true
+    isKnown = known
     f:SetShown(known)
+    if bar and barOn then bar:SetShown(known) end
     if not known then return end
     icon:SetTexture(C_Spell.GetSpellTexture(SPELL)) -- first, so the frame is never an invisible box
 
@@ -97,6 +209,7 @@ local function Rebuild()
     if isSecret(m) or c <= 0 or m <= 0 then return end -- guard every divisor
 
     cost, maxMana = c, m
+    if bar then bar:SetMinMaxValues(0, m); LayoutTicks() end
     n = math.min(math.floor(m / c), MAX_LABELS)
     for k = 0, MAX_LABELS do
         local fs = Label(k)
@@ -119,6 +232,7 @@ f:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + dt
     if elapsed < 0.1 or n < 0 then return end
     elapsed = 0
+    if barOn then bar:SetValue(UnitPower("player", MANA)) end -- SetValue takes the secret; no arithmetic on it
     for k = 0, n do
         labels[k]:SetAlpha(UnitPowerPercent("player", MANA, false, curves[k]))
     end
@@ -206,21 +320,23 @@ InitSettings = function()
         settingObjs[key] = st
         return st
     end
-    local function choice(key, name)
+    local function choice(key, name, tip)
         local function opts()
             local c = Settings.CreateControlTextContainer()
             for i, e in ipairs(CHOICES[key]) do c:Add(i, e[2]) end
             return c:GetData()
         end
-        Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts)
+        Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts, tip)
     end
-    local function slider(key, name, lo, hi, step)
+    local function slider(key, name, lo, hi, step, tip)
         local st = add(key, Settings.VarType.Number, name)
         -- no right-hand value label: the number box takes its place
-        AttachBox(Settings.CreateSlider(category, st, Settings.CreateSliderOptions(lo, hi, step)), st, key, lo, hi, step)
+        AttachBox(Settings.CreateSlider(category, st, Settings.CreateSliderOptions(lo, hi, step), tip), st, key, lo, hi, step)
     end
-    choice("mode", "Display")
-    slider("scale", "Size", 0.5, 3, 0.1)
+    choice("mode", "Display", "Bar on player frame adds a fourth row under the player unit frame's bars, one strata "
+        .. "below it. It matches the unit frame, so Size and the lock/position settings do not apply to it. If the "
+        .. "player frame is hidden or replaced, the floating frame is used instead. Changes in combat wait until combat ends.")
+    slider("scale", "Size", 0.5, 3, 0.1, "Scales the floating frame (icon and number together). Not used by the bar.")
     slider("iconAlpha", "Icon opacity", 0, 1, 0.05)
     Settings.CreateCheckbox(category, add("locked", Settings.VarType.Boolean, "Lock position"))
     layout:AddInitializer(CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
@@ -231,11 +347,17 @@ InitSettings = function()
     choice("color", "Number colour")
     choice("textPos", "Number position")
     Settings.CreateCheckbox(category, add("zeroRed", Settings.VarType.Boolean, "Show 0 in red"))
+    choice("barColor", "Bar colour", "Fill of the bar on the player frame.")
+    Settings.CreateCheckbox(category, add("ticks", Settings.VarType.Boolean, "Bar: show cast ticks"),
+        "A tick at every multiple of the Shifting Power cost, so each segment is one cast.")
+    Settings.CreateCheckbox(category, add("barText", Settings.VarType.Boolean, "Bar: show count"),
+        "Show the number of casts on the bar.")
     Settings.RegisterAddOnCategory(category)
 end
 
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
+f:RegisterEvent("PLAYER_ENTERING_WORLD")
 f:RegisterEvent("SPELLS_CHANGED")
 f:RegisterEvent("PLAYER_LEVEL_UP")
 f:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
@@ -252,6 +374,11 @@ f:SetScript("OnEvent", function(_, event)
         if pos then f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else f:SetPoint("CENTER", 0, -150) end
         Apply()
         InitSettings()
+    elseif event == "PLAYER_ENTERING_WORLD" and ShiftingPowerCountDB then
+        Apply() -- PlayerFrame is up now
+    elseif event == "PLAYER_REGEN_ENABLED" and pendingLayout then
+        pendingLayout = false
+        Layout()
     end
     Rebuild()
 end)
@@ -262,8 +389,8 @@ local function Set(key, v)
     Apply()
 end
 
-local USAGE = "/spcount size <0.5-3> | mode icon|text | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
-    .. " | zero on|off | lock | unlock | reset"
+local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
+    .. " | barcolor | ticks on|off | bartext on|off | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
@@ -273,8 +400,8 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         print("Shifting Power Count: " .. cmd .. "ed")
     elseif cmd == "reset" then
         ResetPos()
-    elseif cmd == "zero" and (arg == "on" or arg == "off") then
-        Set("zeroRed", arg == "on")
+    elseif CLI_BOOL[cmd] and (arg == "on" or arg == "off") then
+        Set(CLI_BOOL[cmd], arg == "on")
     elseif CLI_NUM[cmd] then
         local key, lo, hi = unpack(CLI_NUM[cmd])
         local v = tonumber(arg)
