@@ -21,7 +21,8 @@ function F.install(o)
         function t.SetPoint(s, ...) s.point = { ... } end
         function t.SetTexture(s, x) s.texture = x; w.texture = x end
         function t.SetShown(s, v) s.shown = v; s.hidden = not v; w.shown[#w.shown + 1] = v end
-        function t.SetVertexColor(s, r, g, b) s.vertex = { r, g, b } end
+        function t.SetVertexColor(s, r, g, b) s.vertex = { r, g, b }; s.vwrites = (rawget(s, "vwrites") or 0) + 1 end
+        function t.GetVertexColor(s) local v = rawget(s, "vertex") or { 1, 1, 1 }; return v[1], v[2], v[3], 1 end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
         function t.CreateTexture(s)
             local tx = obj()
@@ -61,12 +62,18 @@ function F.install(o)
     else
         local pf = obj()
         pf.PlayerFrameContainer = {}
+        if o.pfArt then pf.PlayerFrameContainer.AlternatePowerFrameTexture = obj(); pf.PlayerFrameContainer.FrameTexture = obj() end
         pf.strata = "LOW"
         function pf.IsShown() return w.pfShown ~= false end
         _G.PlayerFrame = pf
         w.playerFrame = pf
     end
     _G.UIParent = {}
+    _G.hooksecurefunc = function(t, name, fn) -- post-hook: runs after the original, like the client's
+        local orig = t[name]
+        t[name] = function(...) local a, b = orig(...); fn(...); return a, b end
+    end
+    _G.C_AddOns = { IsAddOnLoaded = function(n) return n == "DarkMode" and o.darkMode == true end }
     -- Fake Settings API: records registrations; an addon setting writes its table and calls the callback on SetValue.
     local reg = { settings = {}, controls = {}, buttons = {} }
     w.settings = reg

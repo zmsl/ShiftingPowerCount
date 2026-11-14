@@ -13,7 +13,7 @@ local isSecret = issecretvalue or function() return false end
 -- Options live in ShiftingPowerCountDB (defaults filled at login). Choice options store an index into CHOICES.
 local DEFAULTS = { mode = 1, scale = 1, iconAlpha = 0.35, zeroRed = true, locked = false,
     fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1, ticks = true, barColor = 1, barText = true,
-    dark = false, tickColor = 1, catOnly = true }
+    barStyle = 1, tickColor = 1, catOnly = true }
 local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM = 1)
 local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
@@ -28,11 +28,12 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
     color = { { "white", "White", { 1, 1, 1 } }, { "yellow", "Yellow", { 1, 0.82, 0 } }, { "green", "Green", { 0.2, 1, 0.2 } },
         { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
+    barStyle = { { "normal", "Normal" }, { "match", "Match player frame" }, { "dark", "Dark" } },
     textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
 }
 local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor" }
-local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", dark = "dark", catonly = "catOnly" }
+    tickcolor = "tickColor", dark = "barStyle" }
+local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
 local settingObjs, category = {}, nil
 local InitSettings
@@ -72,7 +73,10 @@ local overlay, barArt, barBg -- overlay: label host above the bar (outside the m
 local barOn = false -- the display actually realised (mode asked for AND PlayerFrame usable)
 local pendingLayout, warned, isKnown = false, false, false
 local catOk, lastCatOnly = true, DEFAULTS.catOnly -- catOk: Cat Form (or the restriction is off)
-local DARK_ART, DARK_FILL = 0.45, 0.6 -- dark mode brightness of our art copy / our fill
+local DARK_ART, DARK_FILL = 0.45, 0.6 -- Dark style brightness of our art copy / our fill
+local STYLE_NORMAL, STYLE_MATCH, STYLE_DARK = 1, 2, 3
+local frameRGB = { 1, 1, 1 } -- vertex colour last read off PlayerFrame's frame art (DarkMode or any recolouring addon)
+local hookedTex = {}
 
 local function Style(fs, k) -- every label gets the same font, outline and anchor; only the colour of "0" can differ
     local size = Opt("fontSize")
@@ -124,14 +128,69 @@ local function LayoutTicks() -- one tick per Shifting Power cost: the segments a
     end
 end
 
+-- Match style: read (never write) the vertex colour PlayerFrame's art carries. DarkMode (D4KiR) colours
+-- PlayerFrameContainer.FrameTexture and .AlternatePowerFrameTexture with SetVertexColor; the extended art our copy
+-- mirrors is the alternate one. Plain values, guarded against secrets anyway.
+local FRAME_ART = { "AlternatePowerFrameTexture", "FrameTexture" }
+local function PlayerArt()
+    return _G.PlayerFrame and _G.PlayerFrame.PlayerFrameContainer
+end
+local function SampleFrameColor()
+    local c = PlayerArt()
+    for _, key in ipairs(FRAME_ART) do
+        local t = c and c[key]
+        if t and t.GetVertexColor then
+            local r, g, b = t:GetVertexColor()
+            if type(r) == "number" and type(g) == "number" and type(b) == "number"
+                and not (isSecret(r) or isSecret(g) or isSecret(b)) then
+                frameRGB = { r, g, b }
+                return
+            end
+        end
+    end
+    frameRGB = { 1, 1, 1 }
+end
+
+-- Our own art copy and well only; PlayerFrame's textures are never written.
+local function ArtVisuals()
+    local style = Opt("barStyle")
+    if style == STYLE_MATCH then
+        barArt:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
+        barBg:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
+        -- the well only where something recoloured the frame (plain white = unmodified frame, no well)
+        local plain = frameRGB[1] == 1 and frameRGB[2] == 1 and frameRGB[3] == 1
+        if plain then barBg:Hide() else barBg:Show() end
+    else
+        local dark = style == STYLE_DARK
+        barArt:SetVertexColor(dark and DARK_ART or 1, dark and DARK_ART or 1, dark and DARK_ART or 1)
+        barBg:SetVertexColor(1, 1, 1)
+        if dark then barBg:Show() else barBg:Hide() end
+    end
+end
+
+local function HookFrameArt() -- once per texture: a later recolour of PlayerFrame's art reaches our copy
+    local c = PlayerArt()
+    for _, key in ipairs(FRAME_ART) do
+        local t = c and c[key]
+        if t and t.SetVertexColor and not hookedTex[t] then
+            hookedTex[t] = true
+            hooksecurefunc(t, "SetVertexColor", function()
+                SampleFrameColor()
+                if barArt and Opt("barStyle") == STYLE_MATCH then ArtVisuals() end
+            end)
+        end
+    end
+end
+
 local function BarVisuals()
     local atlas = Choice("barColor")[3]
     if atlas ~= barAtlas then barAtlas = atlas; bar:SetStatusBarTexture(atlas) end -- once per change: keeps the mask
-    local dark = Opt("dark")
-    local fill = bar:GetStatusBarTexture() -- our own fill only; PlayerFrame's textures are never touched
+    local dark = Opt("barStyle") == STYLE_DARK
+    local fill = bar:GetStatusBarTexture() -- our own fill keeps its colour in Match; PlayerFrame's textures are never touched
     if fill then fill:SetVertexColor(dark and DARK_FILL or 1, dark and DARK_FILL or 1, dark and DARK_FILL or 1) end
-    if barArt then barArt:SetVertexColor(dark and DARK_ART or 1, dark and DARK_ART or 1, dark and DARK_ART or 1) end
-    if barBg then if dark then barBg:Show() else barBg:Hide() end end
+    HookFrameArt()
+    SampleFrameColor()
+    ArtVisuals()
     LayoutTicks()
 end
 
@@ -406,8 +465,9 @@ InitSettings = function()
     choice("textPos", "Number position")
     Settings.CreateCheckbox(category, add("zeroRed", Settings.VarType.Boolean, "Show 0 in red"))
     choice("barColor", "Bar colour", "Fill of the bar on the player frame.")
-    Settings.CreateCheckbox(category, add("dark", Settings.VarType.Boolean, "Bar: dark mode"),
-        "Near-black well behind the fill, a dimmer fill and a darker copy of the frame art for the new row only.")
+    choice("barStyle", "Bar style", "Normal: the plain frame art. Match player frame: the new row's frame art and well "
+        .. "take the colour the player frame has (for example from the DarkMode addon). Dark: a fixed near-black well, "
+        .. "a dimmer fill and a darker copy of the frame art.")
     Settings.CreateCheckbox(category, add("ticks", Settings.VarType.Boolean, "Bar: show cast ticks"),
         "A tick at every multiple of the Shifting Power cost, so each segment is one cast.")
     choice("tickColor", "Bar: tick colour", "Tick colour. Each tick has a 1px edge on both sides.")
@@ -429,6 +489,12 @@ f:RegisterUnitEvent("UNIT_MAXPOWER", "player")
 f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         ShiftingPowerCountDB = ShiftingPowerCountDB or {}
+        local db = ShiftingPowerCountDB
+        if db.barStyle == nil then -- migrate the old boolean "dark"; a fresh install matches when DarkMode is loaded
+            if type(db.dark) == "boolean" then db.barStyle = db.dark and STYLE_DARK or STYLE_NORMAL
+            elseif C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("DarkMode") then db.barStyle = STYLE_MATCH end
+        end
+        db.dark = nil
         for k, v in pairs(DEFAULTS) do
             if ShiftingPowerCountDB[k] == nil then ShiftingPowerCountDB[k] = v end
         end
@@ -458,11 +524,12 @@ local function Set(key, v)
 end
 
 local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
-    .. " | barcolor | tickcolor | dark on|off | catonly on|off | ticks on|off | bartext on|off | zero on|off | lock | unlock | reset"
+    .. " | barcolor | tickcolor | dark normal|match|dark | catonly on|off | ticks on|off | bartext on|off | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
     local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
+    if cmd == "dark" then arg = ({ on = "dark", off = "normal" })[arg] or arg end -- old on|off aliases
     if cmd == "lock" or cmd == "unlock" then
         Set("locked", cmd == "lock")
         print("Shifting Power Count: " .. cmd .. "ed")

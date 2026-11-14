@@ -3,6 +3,7 @@
 ## Notes: How many Shifting Powers your mana pays for right now (works in combat with secret mana).
 ## Author: zmsl
 ## Version: 1.0.0
+## OptionalDeps: DarkMode
 ## SavedVariables: ShiftingPowerCountDB
 
 ShiftingPowerCount.lua
