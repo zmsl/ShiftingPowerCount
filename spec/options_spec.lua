@@ -92,7 +92,9 @@ describe("bar on player frame", function()
     local function ticksOf(bar)
         local r = {}
         for _, t in ipairs(rawget(bar, "textures") or {}) do
-            if rawget(t, "color4") and not rawget(t, "hidden") then r[#r + 1] = t.point[4] end
+            if rawget(t, "color4") and rawget(t, "size") and t.size[1] == 2 and not rawget(t, "hidden") then
+                r[#r + 1] = t.point[4] + 1 -- core is anchored 1px left of the tick position (2px wide, centred)
+            end
         end
         return r
     end
@@ -114,8 +116,9 @@ describe("bar on player frame", function()
         slash("mode bar")
         assert.equal(0, w.frame.alpha)
         for _, fs in ipairs(w.fs) do
-            assert.equal(w.bar, fs.parent)
-            assert.same({ "CENTER", w.bar, "CENTER", 0, 0 }, fs.point)
+            assert.equal(w.overlay, fs.parent) -- never the (masked, clipping) StatusBar
+            assert.is_not.equal(w.bar, fs.parent)
+            assert.same({ "CENTER", w.overlay, "CENTER", 0, 0 }, fs.point)
         end
         slash("mode icon")
         assert.equal(1, w.frame.alpha)
@@ -170,7 +173,7 @@ describe("bar on player frame", function()
         F.fire("PLAYER_REGEN_ENABLED")
         assert.equal(w.playerFrame, w.bar.parent)
         assert.equal(0, w.frame.alpha)
-        assert.equal(12, w.fs[1].font[2]) -- clamped to the 9px row
+        assert.equal(14, w.fs[1].font[2]) -- capped at 14 on the bar
     end)
     it("bar colour, count text and settings panel entries", function()
         local w = start({})
@@ -182,6 +185,91 @@ describe("bar on player frame", function()
         assert.is_false(w.fs[1].hidden)
         for _, k in ipairs({ "barColor", "ticks", "barText" }) do assert.is_table(w.settings.controls[k], k) end
         assert.equal(3, #w.settings.controls.mode.opts)
+    end)
+end)
+
+describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
+    local function parts(bar)
+        local cores, edges = {}, {}
+        for _, t in ipairs(rawget(bar, "textures") or {}) do
+            if rawget(t, "size") and rawget(t, "color4") then
+                if t.size[1] == 2 then cores[#cores + 1] = t elseif t.size[1] == 1 then edges[#edges + 1] = t end
+            end
+        end
+        return cores, edges
+    end
+
+    it("ticks are 2px wide, full height, white 0.9 with dark 1px edges; the colour is a preset", function()
+        local w = start({ cost = 400, max = 2000 })
+        slash("mode bar")
+        local cores, edges = parts(w.bar)
+        assert.equal(4, #cores)
+        assert.equal(8, #edges)
+        assert.same({ 2, 9 }, cores[1].size)
+        assert.same({ 1, 1, 1, 0.9 }, cores[1].color4)
+        assert.same({ 1, 9 }, edges[1].size)
+        assert.same({ 0, 0, 0, 0.8 }, edges[1].color4)
+        slash("tickcolor yellow")
+        assert.same({ 1, 0.9, 0.2, 0.9 }, cores[1].color4)
+        slash("tickcolor black")
+        assert.same({ 0, 0, 0, 0.9 }, cores[1].color4)
+        assert.same({ 1, 1, 1, 0.8 }, edges[1].color4) -- light edges so black ticks read on a dark fill
+        assert.is_table(w.settings.controls.tickColor)
+    end)
+    it("dark mode tints only our own textures and shows the well", function()
+        local w = start({})
+        slash("mode bar")
+        local art, bg = w.bar.textures[1], w.bar.textures[2]
+        assert.is_true(bg.hidden)
+        slash("dark on")
+        assert.is_false(bg.hidden)
+        assert.same({ 0.45, 0.45, 0.45 }, art.vertex)
+        assert.is_nil(rawget(w.playerFrame, "vertex")) -- PlayerFrame itself is never tinted
+        assert.is_nil(rawget(w.playerFrame.PlayerFrameContainer, "vertex"))
+        slash("dark off")
+        assert.same({ 1, 1, 1 }, art.vertex)
+        assert.is_true(bg.hidden)
+        assert.is_table(w.settings.controls.dark)
+    end)
+    it("the overlay is a PlayerFrame child above the bar, not inside it", function()
+        local w = start({})
+        slash("mode bar")
+        assert.equal(w.playerFrame, w.overlay.parent)
+        assert.equal("LOW", w.overlay.strata)
+        assert.equal("BACKGROUND", w.bar.strata)
+    end)
+    it("hides outside Cat Form in every mode and shows again on the form event", function()
+        local w = start({})
+        slash("mode bar")
+        w.form = 5; F.fire("UPDATE_SHAPESHIFT_FORM")
+        assert.same({ true, true, true }, { w.frame.hidden, w.bar.hidden, w.overlay.hidden })
+        w.form = 1; F.fire("UPDATE_SHAPESHIFT_FORMS")
+        assert.same({ false, false, false }, { w.frame.hidden, w.bar.hidden, w.overlay.hidden })
+        slash("mode icon") -- the floating icon too
+        w.form = nil; F.fire("UPDATE_SHAPESHIFT_FORM")
+        assert.is_true(w.frame.hidden)
+    end)
+    it("form changes work in combat, with plain booleans only", function()
+        local w = start({})
+        slash("mode bar")
+        w.combat = true
+        w.form = 3; F.fire("UPDATE_SHAPESHIFT_FORM")
+        assert.same({ true, true }, { w.bar.hidden, w.overlay.hidden })
+        w.form = 1; F.fire("UPDATE_SHAPESHIFT_FORM")
+        assert.same({ false, false }, { w.bar.hidden, w.overlay.hidden })
+        for _, v in ipairs(w.shown) do assert.is_boolean(v) end
+        F.tick() -- the next tick refreshes the value
+        assert.is_not_nil(rawget(w.bar, "value"))
+    end)
+    it("catonly off shows everywhere; the setting and CLI share the field", function()
+        local w = start({ form = 5 })
+        assert.is_true(w.frame.hidden)
+        slash("catonly off")
+        assert.is_false(ShiftingPowerCountDB.catOnly)
+        assert.is_false(w.frame.hidden)
+        w.settings.settings.catOnly:SetValue(true)
+        assert.is_true(w.frame.hidden)
+        assert.is_table(w.settings.controls.catOnly)
     end)
 end)
 

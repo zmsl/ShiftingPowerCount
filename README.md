@@ -11,7 +11,8 @@ Copy or link this folder (`ShiftingPowerCount`) into the Forever `Interface\AddO
 Options > AddOns > Shifting Power Count, or `/spcount` (opens the panel). Every change applies live, also in combat.
 
 - Display: Icon and number, Number only, or Bar on player frame. (No "icon only": the number is the point of the addon.)
-- Bar on player frame: a mana bar as a fourth row under the default player frame's bars, in a StatusBar parented to PlayerFrame one strata below it (so the portrait ring tucks over its left end). It uses the unit frame's own bar atlases, mask and extended frame art, with a tick at every Shifting Power cost and the count on the bar. Size does not apply to it; the number size is capped at 12 there. If PlayerFrame is hidden or replaced by another unit-frame addon, the floating frame is used and a chat line says so once. A mode change in combat waits until combat ends. Bar options: colour, cast ticks, count text.
+- Bar on player frame: a mana bar as a fourth row under the default player frame's bars, in a StatusBar parented to PlayerFrame one strata below it (so the portrait ring tucks over its left end). It uses the unit frame's own bar atlases, mask and extended frame art, with a tick at every Shifting Power cost and the count on the bar. Size does not apply to it; the number size is capped at 14 there, and the digits sit on their own overlay frame so they are never clipped by the bar. Ticks are 2px with a 1px edge each side (white, black or yellow). Dark mode gives the row a near-black well, a dimmer fill and a darker copy of the row's art (PlayerFrame's own art is never tinted). If PlayerFrame is hidden or replaced by another unit-frame addon, the floating frame is used and a chat line says so once. A mode change in combat waits until combat ends. Bar options: colour, dark mode, cast ticks, tick colour, count text.
+- Show only in Cat Form (on by default, every mode): hides the display outside Cat Form (GetShapeshiftFormID == 1).
 - Size: scales the whole frame (icon and number together), 0.5 to 3.0. The position is kept.
 - Icon opacity, Lock position, Reset position button.
 - Number size, font (Friz Quadrata, Arial Narrow, Morpheus, Skurri), outline (none, outline, thick), colour (white, yellow, green, cyan, orange), position (center, below, above the icon). All counts share these.
@@ -23,7 +24,7 @@ Options > AddOns > Shifting Power Count, or `/spcount` (opens the panel). Every 
 - `/spcount` prints cost, max mana, casts at full and the main options, and opens the panel
 - `/spcount size <0.5-3>`, `fontsize <8-72>`, `alpha <0-1>`
 - `/spcount mode icon|text|bar`
-- `/spcount barcolor mana|energy|rage|focus|runic`, `ticks on|off`, `bartext on|off`
+- `/spcount barcolor mana|energy|rage|focus|runic`, `tickcolor white|black|yellow`, `dark on|off`, `catonly on|off`, `ticks on|off`, `bartext on|off`
 - `/spcount font frizqt|arialn|morpheus|skurri`, `outline none|outline|thick`, `color white|yellow|green|cyan|orange`, `pos center|below|above`
 - `/spcount zero on|off`
 - `/spcount lock` / `unlock` stops or allows dragging the frame

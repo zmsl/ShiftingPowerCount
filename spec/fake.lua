@@ -20,7 +20,8 @@ function F.install(o)
         function t.ClearAllPoints(s) s.point = nil end
         function t.SetPoint(s, ...) s.point = { ... } end
         function t.SetTexture(s, x) s.texture = x; w.texture = x end
-        function t.SetShown(s, v) s.shown = v; w.shown[#w.shown + 1] = v end
+        function t.SetShown(s, v) s.shown = v; s.hidden = not v; w.shown[#w.shown + 1] = v end
+        function t.SetVertexColor(s, r, g, b) s.vertex = { r, g, b } end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
         function t.CreateTexture(s)
             local tx = obj()
@@ -43,11 +44,14 @@ function F.install(o)
         return setmetatable(t, { __index = function() return function() end end }) -- other widget methods: no-ops
     end
     w.boxes = {}
-    _G.CreateFrame = function(kind, _, parent)
+    w.form = o.form or 1 -- GetShapeshiftFormID: 1 = Cat Form
+    _G.GetShapeshiftFormID = function() return w.form end
+    _G.CreateFrame = function(kind, name, parent)
         local fr = obj()
         fr.parent = parent
         if kind == "EditBox" then w.boxes[#w.boxes + 1] = fr
         elseif kind == "StatusBar" then w.bar = fr
+        elseif name == "ShiftingPowerCountOverlay" then w.overlay = fr
         else w.frame = fr end
         return fr
     end
