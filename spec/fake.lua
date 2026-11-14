@@ -23,6 +23,9 @@ function F.install(o)
         function t.SetShown(s, v) s.shown = v; s.hidden = not v; w.shown[#w.shown + 1] = v end
         function t.SetVertexColor(s, r, g, b) s.vertex = { r, g, b }; s.vwrites = (rawget(s, "vwrites") or 0) + 1 end
         function t.GetVertexColor(s) local v = rawget(s, "vertex") or { 1, 1, 1 }; return v[1], v[2], v[3], 1 end
+        function t.SetDesaturated(s, d) s.desat = d and true or false; s.dwrites = (rawget(s, "dwrites") or 0) + 1 end
+        function t.IsDesaturated(s) return rawget(s, "desat") == true end
+        function t.IsShown(s) return not rawget(s, "hidden") end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
         function t.CreateTexture(s)
             local tx = obj()

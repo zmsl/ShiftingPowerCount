@@ -128,10 +128,11 @@ local function LayoutTicks() -- one tick per Shifting Power cost: the segments a
     end
 end
 
--- Match style: read (never write) the vertex colour PlayerFrame's art carries. DarkMode (D4KiR) colours
--- PlayerFrameContainer.FrameTexture and .AlternatePowerFrameTexture with SetVertexColor; the extended art our copy
--- mirrors is the alternate one. Plain values, guarded against secrets anyway.
-local FRAME_ART = { "AlternatePowerFrameTexture", "FrameTexture" }
+-- Match style: read (never write) what PlayerFrame's art carries. DarkMode (D4KiR) greys a texture with
+-- SetDesaturated(true) (its Desaturate option) and then multiplies its colour in with SetVertexColor, so both are
+-- mirrored. The visible texture is sampled first: the alternate one is hidden on Forever and may stay uncoloured.
+local FRAME_ART = { "FrameTexture", "AlternatePowerFrameTexture" }
+local frameDesat = false
 local function PlayerArt()
     return _G.PlayerFrame and _G.PlayerFrame.PlayerFrameContainer
 end
@@ -139,7 +140,9 @@ local function SampleFrameColor()
     local c = PlayerArt()
     for _, key in ipairs(FRAME_ART) do
         local t = c and c[key]
-        if t and t.GetVertexColor then
+        if t and t.GetVertexColor and (key ~= "FrameTexture" or not t.IsShown or t:IsShown()) then
+            local d = t.IsDesaturated and t:IsDesaturated()
+            frameDesat = d == true and not isSecret(d)
             local r, g, b = t:GetVertexColor()
             if type(r) == "number" and type(g) == "number" and type(b) == "number"
                 and not (isSecret(r) or isSecret(g) or isSecret(b)) then
@@ -148,17 +151,19 @@ local function SampleFrameColor()
             end
         end
     end
-    frameRGB = { 1, 1, 1 }
+    frameRGB, frameDesat = { 1, 1, 1 }, false
 end
 
 -- Our own art copy and well only; PlayerFrame's textures are never written.
 local function ArtVisuals()
     local style = Opt("barStyle")
+    barArt:SetDesaturated(style == STYLE_MATCH and frameDesat)
+    barBg:SetDesaturated(style == STYLE_MATCH and frameDesat)
     if style == STYLE_MATCH then
         barArt:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
         barBg:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
         -- the well only where something recoloured the frame (plain white = unmodified frame, no well)
-        local plain = frameRGB[1] == 1 and frameRGB[2] == 1 and frameRGB[3] == 1
+        local plain = not frameDesat and frameRGB[1] == 1 and frameRGB[2] == 1 and frameRGB[3] == 1
         if plain then barBg:Hide() else barBg:Show() end
     else
         local dark = style == STYLE_DARK
@@ -174,10 +179,12 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
         local t = c and c[key]
         if t and t.SetVertexColor and not hookedTex[t] then
             hookedTex[t] = true
-            hooksecurefunc(t, "SetVertexColor", function()
+            local function resample()
                 SampleFrameColor()
                 if barArt and Opt("barStyle") == STYLE_MATCH then ArtVisuals() end
-            end)
+            end
+            hooksecurefunc(t, "SetVertexColor", resample)
+            if t.SetDesaturated then hooksecurefunc(t, "SetDesaturated", resample) end
         end
     end
 end

@@ -231,28 +231,31 @@ describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
         assert.is_true(bg.hidden)
         assert.is_table(w.settings.controls.barStyle)
     end)
-    it("Bar style Match copies PlayerFrame's art colour, follows later recolours, never writes PlayerFrame", function()
+    it("Bar style Match mirrors the visible frame art (DarkMode: desaturate + colour), follows later changes, never writes PlayerFrame", function()
         local w = start({ pfArt = true })
         local alt = w.playerFrame.PlayerFrameContainer.AlternatePowerFrameTexture
         local frame = w.playerFrame.PlayerFrameContainer.FrameTexture
-        alt:SetVertexColor(0.2, 0.25, 0.3) -- what DarkMode does before we exist
+        frame:SetDesaturated(true); frame:SetVertexColor(0.2, 0.25, 0.3) -- what DarkMode does before we exist
         slash("mode bar")
         slash("dark match")
         local art, bg = w.bar.textures[1], w.bar.textures[2]
-        assert.same({ 0.2, 0.25, 0.3 }, art.vertex)
+        assert.same({ 0.2, 0.25, 0.3 }, art.vertex) -- the visible FrameTexture, not the (white) hidden alternate one
+        assert.is_true(art.desat)
         assert.same({ 0.2, 0.25, 0.3 }, bg.vertex)
         assert.is_false(bg.hidden)
-        alt:SetVertexColor(0.5, 0.5, 0.6) -- a later recolour reaches us through the hook
+        frame:SetVertexColor(0.5, 0.5, 0.6) -- a later recolour reaches us through the hook
         assert.same({ 0.5, 0.5, 0.6 }, art.vertex)
-        assert.same({ 0.5, 0.5, 0.6 }, bg.vertex)
-        alt:SetVertexColor(1, 1, 1) -- unmodified frame: no well
+        frame:SetDesaturated(false); frame:SetVertexColor(1, 1, 1) -- unmodified frame: no well, colour back
+        assert.is_false(art.desat)
         assert.is_true(bg.hidden)
         assert.same({ 1, 1, 1 }, art.vertex)
         slash("dark normal")
-        alt:SetVertexColor(0.1, 0.1, 0.1)
+        frame:SetDesaturated(true); frame:SetVertexColor(0.1, 0.1, 0.1)
         assert.same({ 1, 1, 1 }, art.vertex) -- not matching any more
-        assert.equal(4, rawget(alt, "vwrites")) -- only the four writes this test made itself
-        assert.is_nil(rawget(frame, "vwrites"))
+        assert.is_false(art.desat)
+        assert.equal(4, rawget(frame, "vwrites")) -- only the writes this test made itself
+        assert.equal(3, rawget(frame, "dwrites"))
+        assert.is_nil(rawget(alt, "vwrites"))
         assert.is_nil(rawget(w.playerFrame, "vertex"))
     end)
     it("Match keeps the fill's own colour", function()
