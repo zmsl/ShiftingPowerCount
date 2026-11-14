@@ -10,6 +10,31 @@ local MANA = 0 -- Enum.PowerType.Mana
 local MAX_LABELS = 30
 local isSecret = issecretvalue or function() return false end
 
+-- Options live in ShiftingPowerCountDB (defaults filled at login). Choice options store an index into CHOICES.
+local DEFAULTS = { mode = 1, scale = 1, iconAlpha = 0.35, zeroRed = true, locked = false,
+    fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1 }
+local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
+    mode = { { "icon", "Icon and number" }, { "text", "Number only" } },
+    font = { { "frizqt", "Friz Quadrata", "Fonts\\FRIZQT__.TTF" }, { "arialn", "Arial Narrow", "Fonts\\ARIALN.TTF" },
+        { "morpheus", "Morpheus", "Fonts\\MORPHEUS.ttf" }, { "skurri", "Skurri", "Fonts\\skurri.ttf" } },
+    outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
+    color = { { "white", "White", { 1, 1, 1 } }, { "yellow", "Yellow", { 1, 0.82, 0 } }, { "green", "Green", { 0.2, 1, 0.2 } },
+        { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
+    textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
+}
+local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos" }
+local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
+local settingObjs, category = {}, nil
+local InitSettings
+
+local function Opt(k)
+    local db = ShiftingPowerCountDB
+    local v = db and db[k]
+    if v == nil then return DEFAULTS[k] end
+    return v
+end
+local function Choice(k) return CHOICES[k][Opt(k)] or CHOICES[k][1] end
+
 local f = CreateFrame("Frame", "ShiftingPowerCountFrame", UIParent)
 f:SetSize(64, 64)
 f:SetMovable(true)
@@ -19,18 +44,35 @@ f:SetClampedToScreen(true)
 
 local icon = f:CreateTexture(nil, "BACKGROUND")
 icon:SetAllPoints()
-icon:SetAlpha(0.35)
 
 local labels, curves = {}, {}
 local cost, maxMana, n = 0, 0, -1 -- UnitPowerPercent's input to the curve is 0..1 (Blizzard CurveConstants.ScaleTo100)
+
+-- Every label gets the same font, outline and anchor; only the colour of "0" can differ.
+local function Style(fs, k)
+    fs:SetFont(Choice("font")[3], Opt("fontSize"), Choice("outline")[3])
+    local c = (k == 0 and Opt("zeroRed")) and { 1, 0.2, 0.2 } or Choice("color")[3]
+    fs:SetTextColor(c[1], c[2], c[3])
+    local pos = Opt("textPos")
+    fs:ClearAllPoints()
+    if pos == 2 then fs:SetPoint("TOP", f, "BOTTOM", 0, -2)
+    elseif pos == 3 then fs:SetPoint("BOTTOM", f, "TOP", 0, 2)
+    else fs:SetPoint("CENTER") end
+end
+
+-- Safe in combat: plain values on our own non-secure frame (scale, alpha, font, anchors); no SetShown.
+local function Apply()
+    f:SetScale(Opt("scale"))
+    icon:SetAlpha(Opt("mode") == 1 and Opt("iconAlpha") or 0)
+    for k, fs in pairs(labels) do Style(fs, k) end
+end
 
 local function Label(k)
     local fs = labels[k]
     if not fs then
         fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
-        fs:SetPoint("CENTER")
+        Style(fs, k)
         fs:SetText(k)
-        if k == 0 then fs:SetTextColor(1, 0.2, 0.2) else fs:SetTextColor(1, 1, 1) end
         labels[k] = fs
         curves[k] = C_CurveUtil.CreateCurve()
         curves[k]:SetType(Enum.LuaCurveType.Step)
@@ -91,6 +133,52 @@ f:SetScript("OnDragStop", function(self)
     ShiftingPowerCountDB.pos = { p, rp, x, y }
 end)
 
+local function ResetPos()
+    ShiftingPowerCountDB.pos = nil
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", 0, -150)
+end
+
+-- Options > AddOns panel (Settings API, verified on Forever). RegisterAddOnSetting writes into ShiftingPowerCountDB;
+-- the value callback applies the change live.
+InitSettings = function()
+    if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end -- no panel: CLI only
+    local layout
+    category, layout = Settings.RegisterVerticalLayoutCategory("Shifting Power Count")
+    local function add(key, vtype, name)
+        local st = Settings.RegisterAddOnSetting(category, "SPC_" .. key:upper(), key, ShiftingPowerCountDB, vtype, name, DEFAULTS[key])
+        st:SetValueChangedCallback(function(_, v) ShiftingPowerCountDB[key] = v; Apply() end)
+        settingObjs[key] = st
+        return st
+    end
+    local function choice(key, name)
+        local function opts()
+            local c = Settings.CreateControlTextContainer()
+            for i, e in ipairs(CHOICES[key]) do c:Add(i, e[2]) end
+            return c:GetData()
+        end
+        Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts)
+    end
+    local function slider(key, name, lo, hi, step)
+        local o = Settings.CreateSliderOptions(lo, hi, step)
+        o:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+        Settings.CreateSlider(category, add(key, Settings.VarType.Number, name), o)
+    end
+    choice("mode", "Display")
+    slider("scale", "Size", 0.5, 3, 0.1)
+    slider("iconAlpha", "Icon opacity", 0, 1, 0.05)
+    Settings.CreateCheckbox(category, add("locked", Settings.VarType.Boolean, "Lock position"))
+    layout:AddInitializer(CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
+        "Put the frame back at its default spot", true))
+    slider("fontSize", "Number size", 8, 72, 1)
+    choice("font", "Number font")
+    choice("outline", "Number outline")
+    choice("color", "Number colour")
+    choice("textPos", "Number position")
+    Settings.CreateCheckbox(category, add("zeroRed", Settings.VarType.Boolean, "Show 0 in red"))
+    Settings.RegisterAddOnCategory(category)
+end
+
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
 f:RegisterEvent("SPELLS_CHANGED")
@@ -101,26 +189,57 @@ f:RegisterUnitEvent("UNIT_MAXPOWER", "player")
 f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         ShiftingPowerCountDB = ShiftingPowerCountDB or {}
+        for k, v in pairs(DEFAULTS) do
+            if ShiftingPowerCountDB[k] == nil then ShiftingPowerCountDB[k] = v end
+        end
         local pos = ShiftingPowerCountDB.pos
         f:ClearAllPoints()
         if pos then f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else f:SetPoint("CENTER", 0, -150) end
+        Apply()
+        InitSettings()
     end
     Rebuild()
 end)
 
+local function Set(key, v)
+    if settingObjs[key] then settingObjs[key]:SetValue(v) end -- keeps an open panel in step
+    ShiftingPowerCountDB[key] = v
+    Apply()
+end
+
+local USAGE = "/spcount size <0.5-3> | mode icon|text | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
+    .. " | zero on|off | lock | unlock | reset"
+
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
-    msg = (msg or ""):lower()
-    if msg == "lock" or msg == "unlock" then
-        ShiftingPowerCountDB.locked = msg == "lock"
-        print("Shifting Power Count: " .. msg .. "ed")
-    elseif msg == "reset" then
-        ShiftingPowerCountDB.pos = nil
-        f:ClearAllPoints()
-        f:SetPoint("CENTER", 0, -150)
-    else
+    local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
+    if cmd == "lock" or cmd == "unlock" then
+        Set("locked", cmd == "lock")
+        print("Shifting Power Count: " .. cmd .. "ed")
+    elseif cmd == "reset" then
+        ResetPos()
+    elseif cmd == "zero" and (arg == "on" or arg == "off") then
+        Set("zeroRed", arg == "on")
+    elseif CLI_NUM[cmd] then
+        local key, lo, hi = unpack(CLI_NUM[cmd])
+        local v = tonumber(arg)
+        if not v then return print(("Shifting Power Count: %s needs a number %s-%s"):format(cmd, lo, hi)) end
+        Set(key, math.max(lo, math.min(hi, v)))
+    elseif CLI_KEY[cmd] then
+        local key = CLI_KEY[cmd]
+        local names = {}
+        for i, e in ipairs(CHOICES[key]) do
+            if e[1] == arg then return Set(key, i) end
+            names[#names + 1] = e[1]
+        end
+        print("Shifting Power Count: " .. cmd .. " is one of " .. table.concat(names, ", "))
+    elseif cmd == "" then
         Rebuild()
-        print(("Shifting Power Count: cost %s, max mana %s, %d casts at full. /spcount lock | unlock | reset")
-            :format(tostring(cost), tostring(maxMana), n))
+        print(("Shifting Power Count: cost %s, max mana %s, %d casts at full, size %s, mode %s, %s")
+            :format(tostring(cost), tostring(maxMana), n, tostring(Opt("scale")), Choice("mode")[1],
+                Opt("locked") and "locked" or "unlocked"))
+        if category and Settings.OpenToCategory then Settings.OpenToCategory(category:GetID()) end
+    else
+        print("Shifting Power Count: " .. USAGE)
     end
 end

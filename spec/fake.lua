@@ -11,15 +11,56 @@ function F.install(o)
         function t.SetAlpha(s, a) s.alpha = a end
         function t.SetScript(s, n, fn) s.scripts[n] = fn end
         function t.SetText(s, x) s.text = x end
+        function t.SetScale(s, x) s.scale = x end
+        function t.SetFont(s, path, size, flags) s.font = { path, size, flags } end
+        function t.SetTextColor(s, r, g, b) s.color = { r, g, b } end
+        function t.ClearAllPoints(s) s.point = nil end
+        function t.SetPoint(s, ...) s.point = { ... } end
         function t.SetTexture(s, x) s.texture = x; w.texture = x end
         function t.SetShown(s, v) s.shown = v; w.shown[#w.shown + 1] = v end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
-        function t.CreateTexture() return obj() end
+        function t.CreateTexture() w.icon = obj(); return w.icon end
         function t.GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
         return setmetatable(t, { __index = function() return function() end end }) -- other widget methods: no-ops
     end
     _G.CreateFrame = function() w.frame = obj(); return w.frame end
     _G.UIParent = {}
+    -- Fake Settings API: records registrations; an addon setting writes its table and calls the callback on SetValue.
+    local reg = { settings = {}, controls = {}, buttons = {} }
+    w.settings = reg
+    local setting = {}
+    setting.__index = setting
+    function setting:SetValueChangedCallback(fn) self.cb = fn end
+    function setting:GetValue() return self.tbl[self.key] end
+    function setting:SetValue(v) self.tbl[self.key] = v; if self.cb then self.cb(self, v) end end
+    local category = { GetID = function() return 42 end }
+    _G.Settings = {
+        VarType = { Number = "Number", Boolean = "Boolean" }, Default = { True = true, False = false },
+        RegisterVerticalLayoutCategory = function(name)
+            category.name = name
+            return category, { AddInitializer = function(_, i) reg.buttons[#reg.buttons + 1] = i end }
+        end,
+        RegisterAddOnCategory = function(c) reg.category = c end,
+        RegisterAddOnSetting = function(_, var, key, tbl, vtype, name, default)
+            if tbl[key] == nil then tbl[key] = default end
+            local st = setmetatable({ var = var, key = key, tbl = tbl, name = name, vtype = vtype }, setting)
+            reg.settings[key] = st
+            return st
+        end,
+        CreateSliderOptions = function(lo, hi, step) return { lo = lo, hi = hi, step = step, SetLabelFormatter = function() end } end,
+        CreateControlTextContainer = function()
+            local c = { data = {} }
+            function c:Add(v, label) self.data[#self.data + 1] = { value = v, label = label } end
+            function c:GetData() return self.data end
+            return c
+        end,
+        CreateSlider = function(_, st, o) reg.controls[st.key] = { kind = "slider", opts = o } end,
+        CreateDropdown = function(_, st, fn) reg.controls[st.key] = { kind = "dropdown", opts = fn() } end,
+        CreateCheckbox = function(_, st) reg.controls[st.key] = { kind = "checkbox" } end,
+        OpenToCategory = function(id) reg.opened = id end,
+    }
+    _G.MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
+    _G.CreateSettingsButtonInitializer = function(name, text, click) return { name = name, text = text, click = click } end
     _G.Enum = { LuaCurveType = { Step = "Step" } }
     _G.C_CurveUtil = { CreateCurve = function()
         local c = { pts = {} }
@@ -41,7 +82,7 @@ function F.install(o)
     _G.InCombatLockdown = function() return w.combat end
     _G.issecretvalue = function(v) return v == F.SECRET end
     _G.SlashCmdList = {}
-    _G.print = function() end
+    _G.print = function(...) w.printed = table.concat({ ... }, " ") end
     _G.ShiftingPowerCountDB = nil
     dofile("ShiftingPowerCount.lua")
     return w
