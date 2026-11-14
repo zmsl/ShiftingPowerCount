@@ -22,7 +22,8 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
         { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana" }, { "energy", "Energy", BAR_ATLAS .. "Energy" },
         { "rage", "Rage", BAR_ATLAS .. "Rage" }, { "focus", "Focus", BAR_ATLAS .. "Focus" },
-        { "runic", "Runic power", BAR_ATLAS .. "RunicPower" } },
+        { "runic", "Runic power", BAR_ATLAS .. "RunicPower" },
+        { "themed", "Themed (match the frame)", BAR_ATLAS .. "Mana" } }, -- the textured fill, greyed and tinted like the border
     font = { { "frizqt", "Friz Quadrata", "Fonts\\FRIZQT__.TTF" }, { "arialn", "Arial Narrow", "Fonts\\ARIALN.TTF" },
         { "morpheus", "Morpheus", "Fonts\\MORPHEUS.ttf" }, { "skurri", "Skurri", "Fonts\\skurri.ttf" } },
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
@@ -173,6 +174,21 @@ local function ArtVisuals()
     end
 end
 
+-- Our fill only. Themed: the textured fill greyed (as DarkMode greys the border) and tinted with the frame's colour,
+-- lifted halfway to white so it reads against the dark well; the plain colours keep their own hue.
+local function FillVisuals()
+    local fill = bar and bar:GetStatusBarTexture()
+    if not fill then return end
+    local k = Opt("barStyle") == STYLE_DARK and DARK_FILL or 1
+    local themed = Choice("barColor")[1] == "themed"
+    fill:SetDesaturated(themed)
+    if themed then
+        fill:SetVertexColor(k * (0.5 + 0.5 * frameRGB[1]), k * (0.5 + 0.5 * frameRGB[2]), k * (0.5 + 0.5 * frameRGB[3]))
+    else
+        fill:SetVertexColor(k, k, k)
+    end
+end
+
 local function HookFrameArt() -- once per texture: a later recolour of PlayerFrame's art reaches our copy
     local c = PlayerArt()
     for _, key in ipairs(FRAME_ART) do
@@ -182,6 +198,7 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
             local function resample()
                 SampleFrameColor()
                 if barArt and Opt("barStyle") == STYLE_MATCH then ArtVisuals() end
+                if barArt then FillVisuals() end
             end
             hooksecurefunc(t, "SetVertexColor", resample)
             if t.SetDesaturated then hooksecurefunc(t, "SetDesaturated", resample) end
@@ -192,11 +209,9 @@ end
 local function BarVisuals()
     local atlas = Choice("barColor")[3]
     if atlas ~= barAtlas then barAtlas = atlas; bar:SetStatusBarTexture(atlas) end -- once per change: keeps the mask
-    local dark = Opt("barStyle") == STYLE_DARK
-    local fill = bar:GetStatusBarTexture() -- our own fill keeps its colour in Match; PlayerFrame's textures are never touched
-    if fill then fill:SetVertexColor(dark and DARK_FILL or 1, dark and DARK_FILL or 1, dark and DARK_FILL or 1) end
     HookFrameArt()
     SampleFrameColor()
+    FillVisuals() -- our own fill; PlayerFrame's textures are never touched
     ArtVisuals()
     LayoutTicks()
 end
