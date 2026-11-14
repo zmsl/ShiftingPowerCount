@@ -216,6 +216,37 @@ describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
         assert.same({ 1, 1, 1, 0.8 }, edges[1].color4) -- light edges so black ticks read on a dark fill
         assert.is_table(w.settings.controls.tickColor)
     end)
+    it("tick colour Frame cuts the frame art's border slice, mirrors DarkMode, follows hooks, white restores", function()
+        local w = start({ pfArt = true })
+        local frame = w.playerFrame.PlayerFrameContainer.FrameTexture
+        frame:SetDesaturated(true); frame:SetVertexColor(0.2, 0.25, 0.3)
+        slash("mode bar")
+        slash("tickcolor frame") -- Bar style stays Normal: the mirroring does not depend on it
+        local ticks = {}
+        for _, t in ipairs(w.bar.textures) do if rawget(t, "texcoord") and t.texture == 4631591 then ticks[#ticks + 1] = t end end
+        assert.equal(4, #ticks)
+        local tc = ticks[1].texcoord
+        assert.near(1000 / 1024, tc[1], 1e-9); assert.near(1002 / 1024, tc[2], 1e-9)
+        assert.near(59.5 / 512, tc[3], 1e-9); assert.near(68.5 / 512, tc[4], 1e-9)
+        assert.same({ 2, 9 }, ticks[1].size)
+        assert.is_true(ticks[1].desat)
+        assert.same({ 0.2, 0.25, 0.3 }, ticks[1].vertex)
+        for _, t in ipairs(w.bar.textures) do if rawget(t, "size") and t.size[1] == 1 then assert.is_true(t.hidden) end end -- no edges
+        frame:SetVertexColor(0.5, 0.5, 0.6)
+        assert.same({ 0.5, 0.5, 0.6 }, ticks[1].vertex)
+        frame:SetDesaturated(false)
+        assert.is_false(ticks[3].desat)
+        slash("tickcolor white")
+        assert.same({ 1, 1, 1, 0.9 }, ticks[1].color4)
+        assert.same({ 1, 1, 1 }, ticks[1].vertex)
+        assert.is_false(ticks[1].desat)
+        assert.same({ 0, 1, 0, 1 }, ticks[1].texcoord)
+        assert.is_false(ticks[1].hidden)
+        local _, e2 = parts(w.bar)
+        assert.is_false(e2[1].hidden)
+        assert.equal(2, rawget(frame, "vwrites")) -- only this test's own writes
+        assert.is_nil(rawget(w.playerFrame, "vertex"))
+    end)
     it("dark mode tints only our own textures and shows the well", function()
         local w = start({})
         slash("mode bar")

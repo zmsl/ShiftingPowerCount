@@ -19,7 +19,7 @@ local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy /
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
     mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar on player frame" } },
     tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
-        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } } },
+        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana" }, { "energy", "Energy", BAR_ATLAS .. "Energy" },
         { "rage", "Rage", BAR_ATLAS .. "Rage" }, { "focus", "Focus", BAR_ATLAS .. "Focus" },
         { "runic", "Runic power", BAR_ATLAS .. "RunicPower" } },
@@ -67,6 +67,18 @@ local cost, maxMana, n = 0, 0, -1 -- UnitPowerPercent's input to the curve is 0.
 local BAR_W, BAR_H, BAR_X, BAR_Y = 124, 9, 85, -73
 local BAR_FONT_MAX = 14 -- the digits may overflow the 9px row (own overlay frame, never clipped), but not by more
 local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+-- Frame tick colour: a slice of the frame's own border art. Nobody has seen it in game: TUNE IN GAME.
+-- Source: atlas ui-hud-unitframe-player-portraiton-classresource (wow_atlas_search, forever) = sheet 4631591
+-- (interface/hud/uiunitframe.blp, SetTexture(4631591) per wow_file_search), pixels left=808 right=1006 top=1 bottom=75,
+-- so the art is 198x74. Sheet size 1024x512: not stated anywhere in Blizzard code; inferred from the atlases on that
+-- sheet (max right 1023, max bottom 506; the 2x sheet reaches 2047/1021), power-of-two. Blizzard's layout
+-- (PlayerFrame.xml): PlayerFrame 232x100, AlternatePowerFrameTexture CENTER (0,-1.5), our bar at (85,-73) 124x9.
+-- Art left in the frame = 116-99 = 17, art top = 51.5-37 = 14.5. The bar ends at x=209 in the frame = column 192 of
+-- the art, rows 58.5..67.5; the right border column starts there. In the sheet: x = 808+192 = 1000, y = 1+58.5 = 59.5.
+-- TICK_FRAME_X is that column's offset in the atlas (192); it is the one number to nudge (+/- a few px) if the slice
+-- shows the bar's end or the outside of the frame instead of the border. 2px wide, like the colour core.
+local TICK_FRAME_X, TICK_FRAME_W, TICK_FRAME_Y = 192, 2, 58.5
+local SHEET_W, SHEET_H, SHEET_ID, ATLAS_L, ATLAS_T = 1024, 512, 4631591, 808, 1
 local bar, ticks = nil, {}
 local barAtlas
 local overlay, barArt, barBg -- overlay: label host above the bar (outside the masked fill); art/bg: our own textures
@@ -75,6 +87,7 @@ local pendingLayout, warned, isKnown = false, false, false
 local catOk, lastCatOnly = true, DEFAULTS.catOnly -- catOk: Cat Form (or the restriction is off)
 local DARK_ART, DARK_FILL = 0.45, 0.6 -- Dark style brightness of our art copy / our fill
 local STYLE_NORMAL, STYLE_MATCH, STYLE_DARK = 1, 2, 3
+local frameDesat = false
 local frameRGB = { 1, 1, 1 } -- vertex colour last read off PlayerFrame's frame art (DarkMode or any recolouring addon)
 local hookedTex = {}
 
@@ -98,6 +111,30 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
+local function TickLook(t) -- colour ticks, or the frame-art slice mirroring PlayerFrame's desaturation and colour
+    local c = Choice("tickColor")[3]
+    if c == "frame" then
+        local x0 = ATLAS_L + TICK_FRAME_X
+        local y0 = ATLAS_T + TICK_FRAME_Y
+        t.core:SetTexture(SHEET_ID)
+        t.core:SetTexCoord(x0 / SHEET_W, (x0 + TICK_FRAME_W) / SHEET_W, y0 / SHEET_H, (y0 + BAR_H) / SHEET_H)
+        t.core:SetSize(TICK_FRAME_W, BAR_H)
+        t.core:SetDesaturated(frameDesat)
+        t.core:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
+        t.l:Hide(); t.r:Hide()
+        return false
+    end
+    local edge = c[1] == 0 and 1 or 0 -- black ticks get light edges, the others dark ones
+    t.core:SetColorTexture(c[1], c[2], c[3], c[4])
+    t.core:SetTexCoord(0, 1, 0, 1)
+    t.core:SetDesaturated(false)
+    t.core:SetVertexColor(1, 1, 1)
+    t.core:SetSize(2, BAR_H)
+    t.l:SetColorTexture(edge, edge, edge, 0.8)
+    t.r:SetColorTexture(edge, edge, edge, 0.8)
+    return true
+end
+
 local function LayoutTicks() -- one tick per Shifting Power cost: the segments are casts. Plain out-of-combat numbers.
     if not bar then return end
     local show = Opt("ticks") and cost > 0 and maxMana > 0
@@ -113,15 +150,12 @@ local function LayoutTicks() -- one tick per Shifting Power cost: the segments a
                 t.r:SetSize(1, BAR_H)
                 ticks[i] = t
             end
-            local c = Choice("tickColor")[3]
-            local edge = c[1] == 0 and 1 or 0 -- black ticks get light edges, the others dark ones
-            t.core:SetColorTexture(c[1], c[2], c[3], c[4])
-            t.l:SetColorTexture(edge, edge, edge, 0.8)
-            t.r:SetColorTexture(edge, edge, edge, 0.8)
+            local edges = TickLook(t)
             t.core:ClearAllPoints(); t.core:SetPoint("LEFT", bar, "LEFT", x - 1, 0)
             t.l:ClearAllPoints(); t.l:SetPoint("RIGHT", t.core, "LEFT", 0, 0)
             t.r:ClearAllPoints(); t.r:SetPoint("LEFT", t.core, "RIGHT", 0, 0)
-            t.core:Show(); t.l:Show(); t.r:Show()
+            t.core:Show()
+            if edges then t.l:Show(); t.r:Show() end
         elseif t then
             t.core:Hide(); t.l:Hide(); t.r:Hide()
         end
@@ -132,7 +166,6 @@ end
 -- SetDesaturated(true) (its Desaturate option) and then multiplies its colour in with SetVertexColor, so both are
 -- mirrored. The visible texture is sampled first: the alternate one is hidden on Forever and may stay uncoloured.
 local FRAME_ART = { "FrameTexture", "AlternatePowerFrameTexture" }
-local frameDesat = false
 local function PlayerArt()
     return _G.PlayerFrame and _G.PlayerFrame.PlayerFrameContainer
 end
@@ -182,6 +215,7 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
             local function resample()
                 SampleFrameColor()
                 if barArt and Opt("barStyle") == STYLE_MATCH then ArtVisuals() end
+                if barArt and Choice("tickColor")[3] == "frame" then LayoutTicks() end -- regardless of Bar style
             end
             hooksecurefunc(t, "SetVertexColor", resample)
             if t.SetDesaturated then hooksecurefunc(t, "SetDesaturated", resample) end
@@ -477,7 +511,8 @@ InitSettings = function()
         .. "a dimmer fill and a darker copy of the frame art.")
     Settings.CreateCheckbox(category, add("ticks", Settings.VarType.Boolean, "Bar: show cast ticks"),
         "A tick at every multiple of the Shifting Power cost, so each segment is one cast.")
-    choice("tickColor", "Bar: tick colour", "Tick colour. Each tick has a 1px edge on both sides.")
+    choice("tickColor", "Bar: tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. Frame: a slice of the player frame's "
+        .. "own border art, greyed and tinted like it (for example by DarkMode), no edges.")
     Settings.CreateCheckbox(category, add("barText", Settings.VarType.Boolean, "Bar: show count"),
         "Show the number of casts on the bar.")
     Settings.RegisterAddOnCategory(category)
