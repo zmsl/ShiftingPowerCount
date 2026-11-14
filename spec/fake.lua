@@ -3,7 +3,7 @@ local F = {}
 F.SECRET = setmetatable({}, { __index = function() error("indexed a secret") end })
 
 function F.install(o)
-    local w = { mana = o.mana or 0, max = o.max or 2000, cost = o.cost or 400, scale = o.scale or 1,
+    local w = { mana = o.mana or 0, max = o.max or 2000, cost = o.cost or 400,
         combat = false, known = o.known ~= false, shown = {}, fs = {} }
     F.w = w
     local function obj()
@@ -11,6 +11,7 @@ function F.install(o)
         function t.SetAlpha(s, a) s.alpha = a end
         function t.SetScript(s, n, fn) s.scripts[n] = fn end
         function t.SetText(s, x) s.text = x end
+        function t.SetTexture(s, x) s.texture = x; w.texture = x end
         function t.SetShown(s, v) s.shown = v; w.shown[#w.shown + 1] = v end
         function t.CreateFontString() local fs = obj(); w.fs[#w.fs + 1] = fs; return fs end
         function t.CreateTexture() return obj() end
@@ -32,8 +33,8 @@ function F.install(o)
     _G.UnitPowerMax = function() return w.max end
     _G.UnitPowerPercent = function(_, _, _, curve)
         if w.mana == F.SECRET or w.max == F.SECRET then return curve and 0 or F.SECRET end -- client evaluates secrets itself
-        local pct = w.max == 0 and 0 or w.mana / w.max * w.scale
-        return curve and curve:Eval(pct) or pct
+        if not curve then return F.SECRET end -- the real client: a plain percent read is secret even out of combat
+        return curve:Eval(w.max == 0 and 0 or w.mana / w.max) -- input 0..1 (Blizzard CurveConstants.ScaleTo100)
     end
     _G.C_Spell = { GetSpellPowerCost = function() return { { type = 0, cost = w.cost } } end, GetSpellTexture = function() return 1 end }
     _G.C_SpellBook = { IsSpellKnown = function() return w.known end }

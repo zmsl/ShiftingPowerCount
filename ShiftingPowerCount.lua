@@ -22,8 +22,7 @@ icon:SetAllPoints()
 icon:SetAlpha(0.35)
 
 local labels, curves = {}, {}
-local cost, maxMana, scale, n = 0, 0, 1, -1 -- scale: what UnitPowerPercent calls 100% (1 or 100), learned out of combat
-local learned = false -- false until a rebuild saw mana > 0 (at 0 mana the scale is unknowable)
+local cost, maxMana, n = 0, 0, -1 -- UnitPowerPercent's input to the curve is 0..1 (Blizzard CurveConstants.ScaleTo100)
 
 local function Label(k)
     local fs = labels[k]
@@ -39,22 +38,21 @@ local function Label(k)
     return fs
 end
 
--- Out of combat only: read cost, max mana and the percent scale, then rebuild each label's band.
+-- Out of combat only: read cost and max mana (plain there), then rebuild each label's band. The percent itself is
+-- never read: UnitPowerPercent returns a secret even out of combat, so only the client evaluates it, via the curves.
 local function Rebuild()
     if InCombatLockdown() then return end
     local known = C_SpellBook.IsSpellKnown(SPELL) == true
     f:SetShown(known)
     if not known then return end
+    icon:SetTexture(C_Spell.GetSpellTexture(SPELL)) -- first, so the frame is never an invisible box
 
     local c = 0
     for _, info in ipairs(C_Spell.GetSpellPowerCost(SPELL) or {}) do
         if info.type == MANA and not isSecret(info.cost) then c = info.cost end
     end
     local m = UnitPowerMax("player", MANA)
-    local cur, pct = UnitPower("player", MANA), UnitPowerPercent("player", MANA)
-    if isSecret(m) or isSecret(cur) or isSecret(pct) or c <= 0 or m <= 0 then return end -- guard every divisor
-    -- pct == scale * cur / m, so pct * m / cur is the scale; keep the last one when cur or pct is 0
-    if cur > 0 and pct > 0 then scale, learned = (pct * m / cur > 10) and 100 or 1, true end
+    if isSecret(m) or c <= 0 or m <= 0 then return end -- guard every divisor
 
     cost, maxMana = c, m
     n = math.min(math.floor(m / c), MAX_LABELS)
@@ -63,7 +61,7 @@ local function Rebuild()
         local cv = curves[k]
         cv:ClearPoints()
         if k <= n then
-            local lo, hi = k * c / m * scale, (k + 1) * c / m * scale
+            local lo, hi = k * c / m, (k + 1) * c / m
             cv:AddPoint(0, k == 0 and 1 or 0)
             if k > 0 then cv:AddPoint(lo, 1) end
             if k < n then cv:AddPoint(hi, 0) end
@@ -72,7 +70,6 @@ local function Rebuild()
         end
         fs:SetAlpha(0)
     end
-    icon:SetTexture(C_Spell.GetSpellTexture(SPELL))
 end
 
 local elapsed = 0
@@ -80,7 +77,6 @@ f:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + dt
     if elapsed < 0.1 or n < 0 then return end
     elapsed = 0
-    if not learned then Rebuild() end -- no-op in combat; retries until mana > 0 reveals the scale
     for k = 0, n do
         labels[k]:SetAlpha(UnitPowerPercent("player", MANA, false, curves[k]))
     end
@@ -124,7 +120,7 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         f:SetPoint("CENTER", 0, -150)
     else
         Rebuild()
-        print(("Shifting Power Count: cost %s, max mana %s, %d casts at full, percent scale %s. /spcount lock | unlock | reset")
-            :format(tostring(cost), tostring(maxMana), n, tostring(scale)))
+        print(("Shifting Power Count: cost %s, max mana %s, %d casts at full. /spcount lock | unlock | reset")
+            :format(tostring(cost), tostring(maxMana), n))
     end
 end
