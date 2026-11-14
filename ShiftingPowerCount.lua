@@ -139,6 +139,57 @@ local function ResetPos()
     f:SetPoint("CENTER", 0, -150)
 end
 
+-- Number box beside a slider (no XML): the slider initializer's InitFrame/Resetter are wrapped, so the row's pooled
+-- frame gets an InputBoxTemplate EditBox on init and hides it on release. Typed text is clamped to the slider range,
+-- rounded to its step, and sent through the slider, so slider, box, setting and CLI all see one value.
+local boxes = {} -- DB key -> the edit box of the row currently showing that setting
+
+local function Fmt(v) return (("%.4f"):format(v):gsub("0+$", ""):gsub("%.$", "")) end
+
+local function Snap(text, lo, hi, step) -- nil when the text is not a finite number
+    local v = tonumber(text)
+    if not v or v ~= v or v == math.huge or v == -math.huge then return nil end
+    v = lo + math.floor((math.max(lo, math.min(hi, v)) - lo) / step + 0.5) * step
+    return tonumber(("%.4f"):format(math.min(hi, v)))
+end
+
+local function AttachBox(init, st, key, lo, hi, step)
+    local origInit, origReset = init.InitFrame, init.Resetter
+    init.InitFrame = function(self, frame)
+        origInit(self, frame)
+        local box = frame.SPCBox
+        if not box then
+            box = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+            box:SetSize(56, 20)
+            box:SetAutoFocus(false)
+            box:SetFontObject("GameFontHighlightSmall")
+            box:SetPoint("LEFT", frame.SliderWithSteppers, "RIGHT", 14, 0)
+            frame.SPCBox = box
+        end
+        local function show() box:SetText(Fmt(st:GetValue())) end
+        local function commit()
+            local v = Snap(box:GetText(), lo, hi, step)
+            if v then (frame.SliderWithSteppers or st):SetValue(v) end
+            show() -- invalid input reverts; valid input shows the snapped value
+        end
+        box:SetScript("OnEnterPressed", function(b) commit(); b:ClearFocus() end)
+        box:SetScript("OnEditFocusLost", commit)
+        box:SetScript("OnEscapePressed", function(b) show(); b:ClearFocus() end)
+        boxes[key] = box
+        show()
+        box:Show()
+    end
+    init.Resetter = function(self, frame)
+        origReset(self, frame)
+        local box = frame.SPCBox
+        if box then
+            box:ClearFocus()
+            box:Hide()
+            if boxes[key] == box then boxes[key] = nil end
+        end
+    end
+end
+
 -- Options > AddOns panel (Settings API, verified on Forever). RegisterAddOnSetting writes into ShiftingPowerCountDB;
 -- the value callback applies the change live.
 InitSettings = function()
@@ -147,7 +198,11 @@ InitSettings = function()
     category, layout = Settings.RegisterVerticalLayoutCategory("Shifting Power Count")
     local function add(key, vtype, name)
         local st = Settings.RegisterAddOnSetting(category, "SPC_" .. key:upper(), key, ShiftingPowerCountDB, vtype, name, DEFAULTS[key])
-        st:SetValueChangedCallback(function(_, v) ShiftingPowerCountDB[key] = v; Apply() end)
+        st:SetValueChangedCallback(function(_, v)
+            ShiftingPowerCountDB[key] = v
+            Apply()
+            if boxes[key] and type(v) == "number" then boxes[key]:SetText(Fmt(v)) end -- slider/CLI -> box
+        end)
         settingObjs[key] = st
         return st
     end
@@ -160,9 +215,9 @@ InitSettings = function()
         Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts)
     end
     local function slider(key, name, lo, hi, step)
-        local o = Settings.CreateSliderOptions(lo, hi, step)
-        o:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-        Settings.CreateSlider(category, add(key, Settings.VarType.Number, name), o)
+        local st = add(key, Settings.VarType.Number, name)
+        -- no right-hand value label: the number box takes its place
+        AttachBox(Settings.CreateSlider(category, st, Settings.CreateSliderOptions(lo, hi, step)), st, key, lo, hi, step)
     end
     choice("mode", "Display")
     slider("scale", "Size", 0.5, 3, 0.1)

@@ -11,6 +11,9 @@ function F.install(o)
         function t.SetAlpha(s, a) s.alpha = a end
         function t.SetScript(s, n, fn) s.scripts[n] = fn end
         function t.SetText(s, x) s.text = x end
+        function t.GetText(s) return s.text end
+        function t.Show(s) s.hidden = false end
+        function t.Hide(s) s.hidden = true end
         function t.SetScale(s, x) s.scale = x end
         function t.SetFont(s, path, size, flags) s.font = { path, size, flags } end
         function t.SetTextColor(s, r, g, b) s.color = { r, g, b } end
@@ -23,7 +26,12 @@ function F.install(o)
         function t.GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
         return setmetatable(t, { __index = function() return function() end end }) -- other widget methods: no-ops
     end
-    _G.CreateFrame = function() w.frame = obj(); return w.frame end
+    w.boxes = {}
+    _G.CreateFrame = function(kind)
+        local o = obj()
+        if kind == "EditBox" then w.boxes[#w.boxes + 1] = o else w.frame = o end
+        return o
+    end
     _G.UIParent = {}
     -- Fake Settings API: records registrations; an addon setting writes its table and calls the callback on SetValue.
     local reg = { settings = {}, controls = {}, buttons = {} }
@@ -54,7 +62,11 @@ function F.install(o)
             function c:GetData() return self.data end
             return c
         end,
-        CreateSlider = function(_, st, o) reg.controls[st.key] = { kind = "slider", opts = o } end,
+        CreateSlider = function(_, st, o)
+            local init = { InitFrame = function() end, Resetter = function() end } -- Blizzard's mixin defaults, overridden per instance
+            reg.controls[st.key] = { kind = "slider", opts = o, init = init }
+            return init
+        end,
         CreateDropdown = function(_, st, fn) reg.controls[st.key] = { kind = "dropdown", opts = fn() } end,
         CreateCheckbox = function(_, st) reg.controls[st.key] = { kind = "checkbox" } end,
         OpenToCategory = function(id) reg.opened = id end,

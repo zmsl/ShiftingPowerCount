@@ -15,6 +15,7 @@ Options > AddOns > Shifting Power Count, or `/spcount` (opens the panel). Every 
 - Icon opacity, Lock position, Reset position button.
 - Number size, font (Friz Quadrata, Arial Narrow, Morpheus, Skurri), outline (none, outline, thick), colour (white, yellow, green, cyan, orange), position (center, below, above the icon). All counts share these.
 - Show 0 in red (on by default; off uses the number colour).
+- Each slider (Size, Icon opacity, Number size) has a number box beside it. Type a value and press Enter or click away: it is clamped to the slider range and rounded to its step; invalid text reverts (Escape reverts too). Box, slider and `/spcount` commands stay in step.
 
 ## Commands
 

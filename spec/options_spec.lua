@@ -87,3 +87,77 @@ describe("options", function()
         assert.equal(before, #w.shown)
     end)
 end)
+
+describe("number boxes", function()
+    -- Mimics a pooled SettingsSliderControlTemplate row: the slider routes its value into the setting.
+    local function row(w, key)
+        local st = w.settings.settings[key]
+        local frame = { SliderWithSteppers = { SetValue = function(_, v) st:SetValue(v) end } }
+        local init = w.settings.controls[key].init
+        init:InitFrame(frame)
+        return frame, frame.SPCBox, init
+    end
+    local function type_(box, text) box:SetText(text); box.scripts.OnEnterPressed(box) end
+
+    it("every numeric setting gets a box showing its value", function()
+        local w = start({})
+        for key, want in pairs({ scale = "1", iconAlpha = "0.35", fontSize = "20" }) do
+            local _, box = row(w, key)
+            assert.equal(want, box:GetText(), key)
+        end
+    end)
+    it("commits a typed number and sends it through the slider", function()
+        local w = start({})
+        local _, box = row(w, "scale")
+        type_(box, "2.2")
+        assert.same({ 2.2, 2.2, "2.2" }, { ShiftingPowerCountDB.scale, w.frame.scale, box:GetText() })
+    end)
+    it("commits on losing focus too", function()
+        local w = start({})
+        local _, box = row(w, "fontSize")
+        box:SetText("31"); box.scripts.OnEditFocusLost(box)
+        assert.same({ 31, 31 }, { ShiftingPowerCountDB.fontSize, w.fs[1].font[2] })
+    end)
+    it("clamps to the slider range and rounds to its step", function()
+        local w = start({})
+        local _, scale = row(w, "scale")
+        type_(scale, "9"); assert.equal(3, ShiftingPowerCountDB.scale)
+        type_(scale, "-4"); assert.equal(0.5, ShiftingPowerCountDB.scale)
+        type_(scale, "1.26"); assert.same({ 1.3, "1.3" }, { ShiftingPowerCountDB.scale, scale:GetText() })
+        local _, size = row(w, "fontSize")
+        type_(size, "20.6"); assert.equal(21, ShiftingPowerCountDB.fontSize)
+        type_(size, "1000"); assert.equal(72, ShiftingPowerCountDB.fontSize)
+        local _, a = row(w, "iconAlpha")
+        type_(a, "0.37"); assert.equal(0.35, ShiftingPowerCountDB.iconAlpha)
+    end)
+    it("reverts invalid input and on Escape", function()
+        local w = start({})
+        local _, box = row(w, "scale")
+        for _, bad in ipairs({ "abc", "", "nan", "inf", "1..2" }) do
+            type_(box, bad)
+            assert.same({ 1, "1" }, { ShiftingPowerCountDB.scale, box:GetText() }, bad)
+        end
+        box:SetText("2.5"); box.scripts.OnEscapePressed(box)
+        assert.same({ 1, "1" }, { ShiftingPowerCountDB.scale, box:GetText() })
+    end)
+    it("slider and CLI changes update the box, both ways live", function()
+        local w = start({})
+        local frame, box = row(w, "scale")
+        frame.SliderWithSteppers:SetValue(1.8) -- slider drag
+        assert.equal("1.8", box:GetText())
+        slash("size 2.4") -- CLI
+        assert.equal("2.4", box:GetText())
+        type_(box, "0.7") -- box
+        assert.same({ 0.7, 0.7 }, { ShiftingPowerCountDB.scale, w.frame.scale })
+        slash("fontsize 40") -- another setting's box stays untouched
+        assert.equal("0.7", box:GetText())
+    end)
+    it("a released row hides its box and stops following the setting", function()
+        local w = start({})
+        local frame, box, init = row(w, "scale")
+        init:Resetter(frame)
+        assert.is_true(box.hidden)
+        slash("size 2")
+        assert.equal("1", box:GetText())
+    end)
+end)
