@@ -2,7 +2,9 @@
 ## Title: Shifting Power Count
 ## Notes: How many Shifting Powers your mana pays for right now (works in combat with secret mana).
 ## Author: zmsl
-## Version: 1.0.0
+## Version: @project-version@
+## X-Website: https://github.com/zmsl/ShiftingPowerCount
+## X-Curse-Project-ID: 1812424
 ## OptionalDeps: DarkMode
 ## SavedVariables: ShiftingPowerCountDB
 

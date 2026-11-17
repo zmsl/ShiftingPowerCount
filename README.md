@@ -36,6 +36,12 @@ Settings are saved in `ShiftingPowerCountDB`; the panel and the commands write t
 
 Mana is secret in combat, so the addon never does arithmetic on it. It keeps one label per count, each with a step curve over mana percent that is 1 only inside its band, and `UnitPowerPercent(..., curve)` hands the secret result straight to `SetAlpha`. Cost and max mana are read out of combat and the bands are rebuilt. Option changes only touch plain values on the addon's own frame (scale, alpha, font, anchors).
 
-## Tests
+## Development
 
-`busted spec` (fake client in `spec/fake.lua`).
+`make bootstrap` once (Lua 5.1, busted and luacheck into `.lua/`), then `make check` before a push: luacheck, syntax, the busted specs (fake client in `spec/fake.lua`) and the CurseForge upload tests. `make package-check` builds the zip locally with the pinned BigWigs packager and checks it.
+
+## Release (CurseForge project 1812424, `shifting-power-count`)
+
+1. Move the `## Unreleased` notes in `CHANGELOG.md` under the new version and commit.
+2. Push a tag `vX.Y.Z` (or `vX.Y.Z-rc.N` for a beta). The release workflow runs the checks, builds the zip and attaches it to a **draft** GitHub release.
+3. Edit the draft's notes (they become the CurseForge changelog) and publish it. The publish workflow uploads the zip to CurseForge for WoW Forever 1.60.1; a pre-release uploads as a beta. It needs the repository secret `CF_API_KEY`.
