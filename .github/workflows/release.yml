@@ -1,0 +1,38 @@
+# On a v* tag: run the checks, build the zip with the BigWigs packager (build only, -d: nothing is uploaded), check it,
+# and attach it to a DRAFT GitHub release. Nothing is public until a person publishes the draft. A tag with a "-"
+# suffix (v0.2.0-rc.1) drafts a pre-release. Run by hand, it builds and checks only.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # the draft release
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the packager versions from git describe
+          persist-credentials: false # nothing here pushes; keep the token out of .git/config for the third-party packager
+      - uses: jdx/mise-action@v2
+      - run: make bootstrap && make check
+      - uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
+        with:
+          args: -d
+      - run: bash tools/check_package.sh .release/ShiftingPowerCount-*.zip
+      - name: Draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zips=(.release/ShiftingPowerCount-*.zip)
+          [ ${#zips[@]} -eq 1 ] && [ -s "${zips[0]}" ] || { echo "expected one .release/ShiftingPowerCount-*.zip: ${zips[*]}"; exit 1; }
+          pre=()
+          case "$GITHUB_REF_NAME" in *-*) pre=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --draft "${pre[@]}" --title "$GITHUB_REF_NAME" --generate-notes "${zips[0]}"

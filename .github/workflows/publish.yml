@@ -1,0 +1,30 @@
+# Uploads a release to CurseForge (project shifting-power-count, 1812424) when a person publishes its draft on GitHub:
+# the release's ShiftingPowerCount-*.zip, the release notes as the changelog, the tag as the display name, and a
+# pre-release as a beta file. Only `published` fires it; saving an edit, unpublishing or deleting does not.
+# Needs the repository secret CF_API_KEY (a CurseForge API token).
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read # download the release asset
+
+jobs:
+  curseforge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # the tag's tools/cf_upload.py
+      - name: Download the zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --pattern 'ShiftingPowerCount-*.zip' --dir dist
+          zips=(dist/ShiftingPowerCount-*.zip)
+          [ ${#zips[@]} -eq 1 ] && [ -s "${zips[0]}" ] || { echo "expected one ShiftingPowerCount-*.zip asset on $TAG: ${zips[*]}"; exit 1; }
+      - name: Upload to CurseForge
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+        run: python3 tools/cf_upload.py "$GITHUB_EVENT_PATH" dist/ShiftingPowerCount-*.zip
