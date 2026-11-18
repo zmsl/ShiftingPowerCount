@@ -2,6 +2,12 @@
 
 Shows how many casts of Shifting Power (spell 1322605, WoW Forever Feral) your current mana pays for, as one number that stays correct in combat.
 
+## Screenshots
+
+| Icon and number | Number only | Bar on player frame |
+| :---: | :---: | :---: |
+| ![Icon and number: the Shifting Power icon with the count on it](docs/screenshots/icon.png) | ![Number only: the count on its own](docs/screenshots/number.png) | ![Bar on player frame: a fourth row under the player frame's bars, a tick per cast](docs/screenshots/bar.png) |
+
 ## Install
 
 Copy or link this folder (`ShiftingPowerCount`) into the Forever `Interface\AddOns` folder. It needs only the `.toc` and `.lua`.
