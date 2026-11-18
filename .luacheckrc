@@ -3,7 +3,7 @@ std = "lua51"
 max_line_length = false
 codes = true
 
-exclude_files = { ".lua/", ".release/", ".luacheckrc" }
+exclude_files = { ".lua/", ".release/", ".luacheckrc", "Libs/" }
 
 ignore = {
     "11./SLASH_.*", -- slash command globals
@@ -15,7 +15,7 @@ globals = { "ShiftingPowerCountDB", "SlashCmdList" }
 
 -- Game API, FrameXML and client Lua extensions the addon reads.
 read_globals = {
-    "issecretvalue", "CreateFrame", "UIParent", "InCombatLockdown", "hooksecurefunc",
+    "LibStub", "issecretvalue", "CreateFrame", "UIParent", "InCombatLockdown", "hooksecurefunc",
     "GetShapeshiftFormID", "UnitPower", "UnitPowerMax", "UnitPowerPercent", "C_Spell", "C_SpellBook",
     "C_CurveUtil", "C_AddOns", "Enum", "Settings", "CreateSettingsButtonInitializer",
 }

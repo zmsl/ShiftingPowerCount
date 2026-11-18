@@ -1,0 +1,73 @@
+local F = dofile("spec/fake.lua")
+
+local function login(db, o)
+    F.install(o or {}); _G.ShiftingPowerCountDB = db; F.fire("PLAYER_LOGIN")
+    return F.w, ShiftingPowerCountDB
+end
+
+describe("migration", function()
+    it("keeps a customised v1.0.0 look in every mode", function()
+        local _, db = login({ mode = 2, scale = 1.7, iconAlpha = 0.5, fontSize = 24, font = 2, outline = 3, color = 3,
+            textPos = 2, zeroRed = false, ticks = false, tickColor = 2, barText = false, barColor = 2, barStyle = 3 })
+        assert.same({ scale = 1.7, iconAlpha = 0.5, fontSize = 24, font = "Arial Narrow", outline = 3, color = 3,
+            textPos = 2, zeroRed = false }, db.icon)
+        assert.same({ scale = 1.7, fontSize = 24, font = "Arial Narrow", outline = 3, color = 3, zeroRed = false }, db.text)
+        for k, v in pairs({ font = "Arial Narrow", fontSize = 24, ticks = false, tickColor = 2, barText = false,
+            barColor = 2, barStyle = 3, placement = 1 }) do
+            assert.equal(v, db.bar[k], k)
+        end
+        for _, k in ipairs({ "scale", "font", "fontSize", "ticks", "barStyle", "iconAlpha" }) do assert.is_nil(db[k], k) end
+        assert.same({ 1, 2 }, { db.schema, db.mode })
+    end)
+    it("a fresh install gets defaults and schema 1, no flat keys left behind", function()
+        local _, db = login(nil)
+        assert.equal(1, db.schema)
+        assert.same({ 1, "Friz Quadrata TT", 20 }, { db.icon.scale, db.bar.font, db.text.fontSize })
+        assert.same({ 1, false, true, true }, { db.mode, db.locked, db.catOnly, db.prdTicks })
+        for _, k in ipairs({ "scale", "font", "fontSize", "ticks", "barStyle", "zeroRed" }) do assert.is_nil(db[k], k) end
+    end)
+    it("runs once: a later login leaves edited mode tables alone", function()
+        local _, db = login({ scale = 2 })
+        db.icon.scale = 3; db.text.fontSize = 9
+        local _, db2 = login(db)
+        assert.same({ 3, 9, 1 }, { db2.icon.scale, db2.text.fontSize, db2.schema })
+    end)
+    it("the old dark boolean still maps to barStyle before migrating", function()
+        local _, db = login({ dark = true })
+        assert.same({ 3, nil }, { db.bar.barStyle, db.dark })
+    end)
+    it("a DarkMode default is not re-applied once migrated", function()
+        local _, db = login({ schema = 1, bar = { barStyle = 1 } }, { darkMode = true })
+        assert.equal(1, db.bar.barStyle)
+        assert.is_nil(db.barStyle)
+    end)
+end)
+
+describe("fonts", function()
+    it("an unknown font name renders the default and is kept", function()
+        local w, db = login({ schema = 1, icon = { font = "Gone" } })
+        assert.equal("Fonts\\FRIZQT__.TTF", w.fs[1].font[1])
+        assert.equal("Gone", db.icon.font)
+    end)
+    it("a LibSharedMedia name reaches the labels; the CLI matches names case-insensitively", function()
+        local w, db = login({})
+        SlashCmdList.SHIFTINGPOWERCOUNT("font arial NARROW")
+        assert.equal("Arial Narrow", db.icon.font)
+        assert.equal("Fonts\\ARIALN.TTF", w.fs[1].font[1])
+        SlashCmdList.SHIFTINGPOWERCOUNT("font nope")
+        assert.equal("Arial Narrow", db.icon.font)
+        assert.matches("Morpheus", w.printed)
+    end)
+    it("the player-frame row caps the number at 14 without changing the stored size", function()
+        local w, db = login({ mode = 3, schema = 1, bar = { fontSize = 20 } })
+        assert.equal(14, w.fs[1].font[2])
+        assert.equal(20, db.bar.fontSize)
+    end)
+    it("style CLI and panel write the current mode's table", function()
+        local w, db = login({ mode = 2 })
+        SlashCmdList.SHIFTINGPOWERCOUNT("fontsize 30")
+        assert.same({ 30, 20 }, { db.text.fontSize, db.icon.fontSize })
+        w.settings.settings.fontSize:SetValue(31)
+        assert.same({ 31, 20 }, { db.text.fontSize, db.icon.fontSize })
+    end)
+end)

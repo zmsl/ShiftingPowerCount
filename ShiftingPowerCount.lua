@@ -10,10 +10,21 @@ local MANA = 0 -- Enum.PowerType.Mana
 local MAX_LABELS = 30
 local isSecret = issecretvalue or function() return false end
 
--- Options live in ShiftingPowerCountDB (defaults filled at login). Choice options store an index into CHOICES.
-local DEFAULTS = { mode = 1, scale = 1, iconAlpha = 0.35, zeroRed = true, locked = false,
-    fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1, ticks = true, barColor = 1, barText = true,
-    barStyle = 1, tickColor = 1, catOnly = true, prdTicks = true }
+local LSM = LibStub("LibSharedMedia-3.0")
+
+-- Options live in ShiftingPowerCountDB (defaults filled at login): General keys at the top level, each display mode's
+-- look in its own table (MODE_KEY[mode]). Choice options store an index into CHOICES; fonts are LibSharedMedia names.
+local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true } -- General
+local MODE_KEY = { "icon", "text", "bar" }
+local FONT = "Friz Quadrata TT"
+local MODE_DEFAULTS = {
+    { scale = 1, iconAlpha = 0.35, fontSize = 20, font = FONT, outline = 1, color = 1, textPos = 1, zeroRed = true },
+    { scale = 1, fontSize = 20, font = FONT, outline = 1, color = 1, zeroRed = true },
+    { placement = 1, ticks = true, tickColor = 1, barText = true, fontSize = 20, font = FONT, outline = 1, color = 1,
+        zeroRed = true, barColor = 1, barStyle = 1 },
+}
+local V1_FONT = { "Friz Quadrata TT", "Arial Narrow", "Morpheus", "Skurri" } -- v1.0.0 stored an index into these
+local SCHEMA = 1
 local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM = 1)
 local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
@@ -23,15 +34,13 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana" }, { "energy", "Energy", BAR_ATLAS .. "Energy" },
         { "rage", "Rage", BAR_ATLAS .. "Rage" }, { "focus", "Focus", BAR_ATLAS .. "Focus" },
         { "runic", "Runic power", BAR_ATLAS .. "RunicPower" } },
-    font = { { "frizqt", "Friz Quadrata", "Fonts\\FRIZQT__.TTF" }, { "arialn", "Arial Narrow", "Fonts\\ARIALN.TTF" },
-        { "morpheus", "Morpheus", "Fonts\\MORPHEUS.ttf" }, { "skurri", "Skurri", "Fonts\\skurri.ttf" } },
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
     color = { { "white", "White", { 1, 1, 1 } }, { "yellow", "Yellow", { 1, 0.82, 0 } }, { "green", "Green", { 0.2, 1, 0.2 } },
         { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
     barStyle = { { "normal", "Normal" }, { "match", "Match player frame" }, { "dark", "Dark" } },
     textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
 }
-local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
+local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
     tickcolor = "tickColor", dark = "barStyle" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
@@ -44,7 +53,59 @@ local function Opt(k)
     if v == nil then return DEFAULTS[k] end
     return v
 end
+
+local function CurMode() local m = Opt("mode"); return MODE_DEFAULTS[m] and m or 1 end
+-- Style value of k in mode m's table (m: 1 icon, 2 text, 3 bar; default the current mode); nil when it has no such key.
+local function S(k, m)
+    m = m or CurMode()
+    local db = ShiftingPowerCountDB
+    local t = db and db[MODE_KEY[m]]
+    local v = t and t[k]
+    if v == nil then return MODE_DEFAULTS[m][k] end
+    return v
+end
 local function Choice(k) return CHOICES[k][Opt(k)] or CHOICES[k][1] end
+local function SChoice(k, m) return CHOICES[k][S(k, m)] or CHOICES[k][1] end
+-- LibSharedMedia returns its default font for a name that is not registered (the stored name is kept).
+local function Scale() return S("scale") or S("scale", 1) end
+local function FontPath() return LSM:Fetch("font", S("font")) end
+
+-- Where the panel and the CLI read and write a key: General at the top level, else the current mode's table if it has
+-- the key, else bar's (the bar-only keys), else icon's. A proxy, so the registered settings follow a mode change.
+local function Where(k)
+    if DEFAULTS[k] ~= nil then return ShiftingPowerCountDB, DEFAULTS end
+    local m = CurMode()
+    if MODE_DEFAULTS[m][k] == nil then m = MODE_DEFAULTS[3][k] ~= nil and 3 or 1 end
+    return ShiftingPowerCountDB[MODE_KEY[m]], MODE_DEFAULTS[m]
+end
+local PANEL = setmetatable({}, {
+    __index = function(_, k)
+        local t, d = Where(k)
+        local v = t[k]
+        if v == nil then return d[k] end
+        return v
+    end,
+    __newindex = function(_, k, v) (Where(k))[k] = v end,
+})
+
+-- v1.0.0 flat keys -> per-mode tables, once (schema absent). Pure: the table in, the table out.
+local function Migrate(db)
+    if db.schema then return db end
+    for m, key in ipairs(MODE_KEY) do
+        local t = type(db[key]) == "table" and db[key] or {}
+        db[key] = t
+        for k in pairs(MODE_DEFAULTS[m]) do
+            local v = db[k]
+            if k == "font" and type(v) == "number" then v = V1_FONT[v] end
+            if v ~= nil and t[k] == nil then t[k] = v end
+        end
+    end
+    for _, defaults in ipairs(MODE_DEFAULTS) do
+        for k in pairs(defaults) do db[k] = nil end
+    end
+    db.schema = SCHEMA
+    return db
+end
 
 local f = CreateFrame("Frame", "ShiftingPowerCountFrame", UIParent)
 f:SetSize(64, 64)
@@ -95,17 +156,17 @@ local frameRGB = { 1, 1, 1 } -- vertex colour last read off PlayerFrame's frame 
 local hookedTex = {}
 
 local function Style(fs, k) -- every label gets the same font, outline and anchor; only the colour of "0" can differ
-    local size = Opt("fontSize")
+    local size = S("fontSize")
     if barOn then size = math.min(size, BAR_FONT_MAX) end
-    fs:SetFont(Choice("font")[3], size, Choice("outline")[3])
-    local c = (k == 0 and Opt("zeroRed")) and { 1, 0.2, 0.2 } or Choice("color")[3]
+    fs:SetFont(FontPath(), size, SChoice("outline")[3])
+    local c = (k == 0 and S("zeroRed")) and { 1, 0.2, 0.2 } or SChoice("color")[3]
     fs:SetTextColor(c[1], c[2], c[3])
-    local pos = Opt("textPos")
+    local pos = S("textPos") or 1 -- only the icon mode has a position
     fs:SetParent(barOn and overlay or f)
     fs:ClearAllPoints()
     if barOn then
         fs:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-        if Opt("barText") then fs:Show() else fs:Hide() end
+        if S("barText", 3) then fs:Show() else fs:Hide() end
     else
         fs:Show()
         if pos == 2 then fs:SetPoint("TOP", f, "BOTTOM", 0, -2)
@@ -115,7 +176,7 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
 end
 
 local function TickLook(t, h, frameArt) -- colour ticks, or the frame-art slice mirroring PlayerFrame's desaturation and colour
-    local c = Choice("tickColor")[3]
+    local c = SChoice("tickColor", 3)[3]
     if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- the PRD has no border art to cut: white
     if c == "frame" then
         local x0 = ATLAS_L + TICK_FRAME_X
@@ -166,7 +227,7 @@ end
 
 local function LayoutTicks()
     local ok = cost > 0 and maxMana > 0
-    if bar then PlaceTicks(bar, ticks, Opt("ticks") and ok, BAR_W, BAR_H, true) end
+    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, true) end
     if prdHost then
         local w, h = prdBar:GetWidth(), prdBar:GetHeight()
         if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
@@ -210,7 +271,7 @@ end
 
 -- Our own art copy and well only; PlayerFrame's textures are never written.
 local function ArtVisuals()
-    local style = Opt("barStyle")
+    local style = S("barStyle", 3)
     barArt:SetDesaturated(style == STYLE_MATCH and frameDesat)
     barBg:SetDesaturated(style == STYLE_MATCH and frameDesat)
     if style == STYLE_MATCH then
@@ -235,8 +296,8 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
             hookedTex[t] = true
             local function resample()
                 SampleFrameColor()
-                if barArt and Opt("barStyle") == STYLE_MATCH then ArtVisuals() end
-                if barArt and Choice("tickColor")[3] == "frame" then LayoutTicks() end -- regardless of Bar style
+                if barArt and S("barStyle", 3) == STYLE_MATCH then ArtVisuals() end
+                if barArt and SChoice("tickColor", 3)[3] == "frame" then LayoutTicks() end -- regardless of Bar style
             end
             hooksecurefunc(t, "SetVertexColor", resample)
             if t.SetDesaturated then hooksecurefunc(t, "SetDesaturated", resample) end
@@ -245,9 +306,9 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
 end
 
 local function BarVisuals()
-    local atlas = Choice("barColor")[3]
+    local atlas = SChoice("barColor", 3)[3]
     if atlas ~= barAtlas then barAtlas = atlas; bar:SetStatusBarTexture(atlas) end -- once per change: keeps the mask
-    local dark = Opt("barStyle") == STYLE_DARK
+    local dark = S("barStyle", 3) == STYLE_DARK
     local fill = bar:GetStatusBarTexture() -- our own fill keeps its colour in Match; PlayerFrame's textures are never touched
     if fill then fill:SetVertexColor(dark and DARK_FILL or 1, dark and DARK_FILL or 1, dark and DARK_FILL or 1) end
     HookFrameArt()
@@ -341,8 +402,8 @@ end
 -- Safe in combat: plain values on our own non-secure frames. Only a mode switch (anchor/strata/parent) waits for
 -- PLAYER_REGEN_ENABLED.
 local function Apply()
-    f:SetScale(Opt("scale"))
-    icon:SetAlpha(Opt("mode") == 1 and Opt("iconAlpha") or 0)
+    f:SetScale(Scale()) -- the bar mode's floating fallback uses the icon mode's size
+    icon:SetAlpha(Opt("mode") == 1 and S("iconAlpha") or 0)
     if bar then BarVisuals() end
     if Opt("catOnly") ~= lastCatOnly then lastCatOnly = Opt("catOnly"); UpdateForm() end
     if (Opt("mode") == 3) ~= barOn then
@@ -491,9 +552,9 @@ InitSettings = function()
     local layout
     category, layout = Settings.RegisterVerticalLayoutCategory("Shifting Power Count")
     local function add(key, vtype, name)
-        local st = Settings.RegisterAddOnSetting(category, "SPC_" .. key:upper(), key, ShiftingPowerCountDB, vtype, name, DEFAULTS[key])
+        local st = Settings.RegisterAddOnSetting(category, "SPC_" .. key:upper(), key, PANEL, vtype, name, PANEL[key])
         st:SetValueChangedCallback(function(_, v)
-            ShiftingPowerCountDB[key] = v
+            PANEL[key] = v
             Apply()
             if boxes[key] and type(v) == "number" then boxes[key]:SetText(Fmt(v)) end -- slider/CLI -> box
         end)
@@ -507,6 +568,14 @@ InitSettings = function()
             return c:GetData()
         end
         Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts, tip)
+    end
+    local function fontChoice(key, name) -- values are LibSharedMedia names
+        local function opts()
+            local c = Settings.CreateControlTextContainer()
+            for _, font in ipairs(LSM:List("font")) do c:Add(font, font) end
+            return c:GetData()
+        end
+        Settings.CreateDropdown(category, add(key, Settings.VarType.String, name), opts)
     end
     local function slider(key, name, lo, hi, step, tip)
         local st = add(key, Settings.VarType.Number, name)
@@ -524,7 +593,7 @@ InitSettings = function()
     layout:AddInitializer(CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
         "Put the frame back at its default spot", true))
     slider("fontSize", "Number size", 8, 72, 1)
-    choice("font", "Number font")
+    fontChoice("font", "Number font")
     choice("outline", "Number outline")
     choice("color", "Number colour")
     choice("textPos", "Number position")
@@ -559,13 +628,20 @@ f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         ShiftingPowerCountDB = ShiftingPowerCountDB or {}
         local db = ShiftingPowerCountDB
-        if db.barStyle == nil then -- migrate the old boolean "dark"; a fresh install matches when DarkMode is loaded
+        if not db.schema and db.barStyle == nil then -- migrate the old boolean "dark"; a fresh install matches when DarkMode is loaded
             if type(db.dark) == "boolean" then db.barStyle = db.dark and STYLE_DARK or STYLE_NORMAL
             elseif C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("DarkMode") then db.barStyle = STYLE_MATCH end
         end
         db.dark = nil
+        Migrate(db)
         for k, v in pairs(DEFAULTS) do
-            if ShiftingPowerCountDB[k] == nil then ShiftingPowerCountDB[k] = v end
+            if db[k] == nil then db[k] = v end
+        end
+        for m, key in ipairs(MODE_KEY) do
+            if type(db[key]) ~= "table" then db[key] = {} end
+            for k, v in pairs(MODE_DEFAULTS[m]) do
+                if db[key][k] == nil then db[key][k] = v end
+            end
         end
         HookPRD()
         local pos = ShiftingPowerCountDB.pos
@@ -590,11 +666,11 @@ end)
 
 local function Set(key, v)
     if settingObjs[key] then settingObjs[key]:SetValue(v) end -- keeps an open panel in step
-    ShiftingPowerCountDB[key] = v
+    PANEL[key] = v
     Apply()
 end
 
-local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
+local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | outline | color | pos | alpha <0-1>"
     .. " | barcolor | tickcolor | dark normal|match|dark | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
@@ -613,6 +689,12 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         local v = tonumber(arg)
         if not v then return print(("Shifting Power Count: %s needs a number %s-%s"):format(cmd, lo, hi)) end
         Set(key, math.max(lo, math.min(hi, v)))
+    elseif cmd == "font" then
+        local want = arg:lower()
+        for _, name in ipairs(LSM:List("font")) do
+            if name:lower() == want then return Set("font", name) end
+        end
+        print("Shifting Power Count: font is one of " .. table.concat(LSM:List("font"), ", "))
     elseif CLI_KEY[cmd] then
         local key = CLI_KEY[cmd]
         local names = {}
@@ -624,7 +706,7 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
     elseif cmd == "" then
         Rebuild()
         print(("Shifting Power Count: cost %s, max mana %s, %d casts at full, size %s, mode %s, %s")
-            :format(tostring(cost), tostring(maxMana), n, tostring(Opt("scale")), Choice("mode")[1],
+            :format(tostring(cost), tostring(maxMana), n, tostring(Scale()), Choice("mode")[1],
                 Opt("locked") and "locked" or "unlocked"))
         if category and Settings.OpenToCategory then Settings.OpenToCategory(category:GetID()) end
     else

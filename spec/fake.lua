@@ -85,6 +85,21 @@ function F.install(o)
         _G.PersonalResourceDisplayFrame = nil
     end
     _G.UIParent = {}
+    -- Stub of LibSharedMedia-3.0: the four stock fonts and the default statusbar. Fetch falls back to the type's default.
+    local media = { font = { ["Friz Quadrata TT"] = "Fonts\\FRIZQT__.TTF", ["Arial Narrow"] = "Fonts\\ARIALN.TTF",
+        Morpheus = "Fonts\\MORPHEUS.ttf", Skurri = "Fonts\\skurri.ttf" },
+        statusbar = { Blizzard = "Interface\\TargetingFrame\\UI-StatusBar" } }
+    local default = { font = "Friz Quadrata TT", statusbar = "Blizzard" }
+    local LSM = {}
+    function LSM:Fetch(kind, name) return media[kind][name] or media[kind][default[kind]] end
+    function LSM:HashTable(kind) return media[kind] end
+    function LSM:List(kind)
+        local r = {}
+        for n in pairs(media[kind]) do r[#r + 1] = n end
+        table.sort(r)
+        return r
+    end
+    _G.LibStub = function(name) assert(name == "LibSharedMedia-3.0", name); return LSM end
     _G.hooksecurefunc = function(t, name, fn) -- post-hook: runs after the original, like the client's
         local orig = t[name]
         t[name] = function(...) local a, b = orig(...); fn(...); return a, b end
@@ -100,7 +115,7 @@ function F.install(o)
     function setting:SetValue(v) self.tbl[self.key] = v; if self.cb then self.cb(self, v) end end
     local category = { GetID = function() return 42 end }
     _G.Settings = {
-        VarType = { Number = "Number", Boolean = "Boolean" }, Default = { True = true, False = false },
+        VarType = { Number = "Number", Boolean = "Boolean", String = "String" }, Default = { True = true, False = false },
         RegisterVerticalLayoutCategory = function(name)
             category.name = name
             return category, { AddInitializer = function(_, i) reg.buttons[#reg.buttons + 1] = i end }
