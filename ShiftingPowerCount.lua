@@ -18,35 +18,34 @@ local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, pr
     prdTickWidth = 2 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
+local WHITE = "ffffffff" -- colours are Blizzard colour-swatch strings, "aarrggbb"
 local MODE_DEFAULTS = {
-    { scale = 1, iconAlpha = 0.35, fontSize = 20, font = FONT, outline = 1, color = 1, textPos = 1, zeroRed = true },
-    { scale = 1, fontSize = 20, font = FONT, outline = 1, color = 1, zeroRed = true },
-    { placement = 1, ticks = true, tickColor = 1, barText = true, fontSize = 20, font = FONT, outline = 1, color = 1,
-        zeroRed = true, barColor = 1, barStyle = 1, width = 150, height = 12, texture = "Blizzard", bgAlpha = 0.5,
+    { scale = 1, iconAlpha = 0.35, fontSize = 20, font = FONT, outline = 1, color = WHITE, textPos = 1, zeroRed = true },
+    { scale = 1, fontSize = 20, font = FONT, outline = 1, color = WHITE, zeroRed = true },
+    { placement = 1, ticks = true, tickColor = "ff000000", barText = true, fontSize = 20, font = FONT, outline = 1,
+        color = WHITE, zeroRed = true, barColor = 1, barCustom = "ff008cff", barStyle = 1, width = 150, height = 12, texture = "Blizzard", bgAlpha = 0.5,
         border = true, textPos = 1 }, -- width .. textPos: the floating bar only
 }
 local V1_FONT = { "Friz Quadrata TT", "Arial Narrow", "Morpheus", "Skurri" } -- v1.0.0 stored an index into these
-local SCHEMA = 1
+local SCHEMA = 2 -- 1: per-mode tables (v1.0.0 flat keys moved); 2: colours are hex strings, not preset indices
+-- The presets colours used to be, by stored index, as hex: number colour, tick colour, bar colour (2-5 become Custom).
+local V1_COLOR = { WHITE, "ffffd100", "ff33ff33", "ff4de6ff", "ffff801a" }
+local V1_TICK = { WHITE, "ff000000", "ffffe633", "ff000000" } -- 4 was Frame (player frame art): now black
+local V1_BAR = { [2] = "ffffd91a", [3] = "ffff2626", [4] = "ffff8040", [5] = "ff00d1ff" } -- energy, rage, focus, runic
 local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM = 1)
-local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
-local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
+local MANA_ATLAS, MANA_RGB = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana", { 0, 0.55, 1 } -- verified Forever
+local CHOICES = { -- DB key -> { CLI name, panel label, value (outline flag) }
     mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar" } },
-    tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
-        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
     prdTickShape = { { "bar", "Bar" }, { "pip", "Pip" } },
-    barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana", { 0, 0.55, 1 } }, { "energy", "Energy", BAR_ATLAS .. "Energy", { 1, 0.85, 0.1 } },
-        { "rage", "Rage", BAR_ATLAS .. "Rage", { 1, 0.15, 0.15 } }, { "focus", "Focus", BAR_ATLAS .. "Focus", { 1, 0.5, 0.25 } },
-        { "runic", "Runic power", BAR_ATLAS .. "RunicPower", { 0, 0.82, 1 } } }, -- [3] atlas (player frame), [4] RGB (floating)
+    barColor = { { "mana", "Mana" }, { "custom", "Custom" } }, -- Custom: barCustom, a colour swatch
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
-    color = { { "white", "White", { 1, 1, 1 } }, { "yellow", "Yellow", { 1, 0.82, 0 } }, { "green", "Green", { 0.2, 1, 0.2 } },
-        { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
     barStyle = { { "normal", "Normal" }, { "match", "Match player frame" }, { "dark", "Dark" } },
     placement = { { "player", "On player frame" }, { "floating", "Floating" } },
     textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
     barTextPos = { { "center", "Center" }, { "left", "Left" }, { "right", "Right" }, { "above", "Above" }, { "below", "Below" } },
 }
-local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape" }
+local CLI_HEX = { color = "color", tickcolor = "tickColor", prdtickcolor = "prdTickColor" } -- RRGGBB arguments
+local CLI_KEY = { mode = "mode", outline = "outline", pos = "textPos", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks",
     border = "border" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 },
@@ -100,21 +99,36 @@ local function Var(k, m) return "SPC_" .. (m and MODE_KEY[m]:upper() .. "_" or "
 
 -- v1.0.0 flat keys -> per-mode tables, once (schema absent). Pure: the table in, the table out.
 local function Migrate(db)
-    if db.schema then return db end
-    for m, key in ipairs(MODE_KEY) do
-        local t = type(db[key]) == "table" and db[key] or {}
-        db[key] = t
-        for k in pairs(MODE_DEFAULTS[m]) do
-            local v = db[k]
-            if k == "font" and type(v) == "number" then v = V1_FONT[v] end
-            if k == "textPos" and m == 3 then v = nil end -- v1.0.0's textPos was the icon's list
-            if v ~= nil and t[k] == nil then t[k] = v end
+    if not db.schema then db.schema = 0 end
+    if db.schema < 1 then
+        for m, key in ipairs(MODE_KEY) do
+            local t = type(db[key]) == "table" and db[key] or {}
+            db[key] = t
+            for k in pairs(MODE_DEFAULTS[m]) do
+                local v = db[k]
+                if k == "font" and type(v) == "number" then v = V1_FONT[v] end
+                if k == "textPos" and m == 3 then v = nil end -- v1.0.0's textPos was the icon's list
+                if v ~= nil and t[k] == nil then t[k] = v end
+            end
         end
+        for _, defaults in ipairs(MODE_DEFAULTS) do
+            for k in pairs(defaults) do db[k] = nil end
+        end
+        db.schema = 1
     end
-    for _, defaults in ipairs(MODE_DEFAULTS) do
-        for k in pairs(defaults) do db[k] = nil end
+    if db.schema < 2 then -- preset indices -> hex; an unknown index becomes nil and takes the default
+        for m, key in ipairs(MODE_KEY) do
+            local t = db[key]
+            if type(t) == "table" then
+                if type(t.color) == "number" then t.color = V1_COLOR[t.color] end
+                if m == 3 and type(t.tickColor) == "number" then t.tickColor = V1_TICK[t.tickColor] end
+                if m == 3 and type(t.barColor) == "number" and t.barColor > 1 then
+                    t.barCustom, t.barColor = V1_BAR[t.barColor], 2
+                end
+            end
+        end
+        db.schema = SCHEMA
     end
-    db.schema = SCHEMA
     return db
 end
 
@@ -139,18 +153,6 @@ local cost, maxMana, n = 0, 0, -1 -- UnitPowerPercent's input to the curve is 0.
 local BAR_W, BAR_H, BAR_X, BAR_Y = 124, 9, 85, -73
 local BAR_FONT_MAX = 14 -- the digits may overflow the 9px row (own overlay frame, never clipped), but not by more
 local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
--- Frame tick colour: a slice of the frame's own border art. Nobody has seen it in game: TUNE IN GAME.
--- Source: atlas ui-hud-unitframe-player-portraiton-classresource (wow_atlas_search, forever) = sheet 4631591
--- (interface/hud/uiunitframe.blp, SetTexture(4631591) per wow_file_search), pixels left=808 right=1006 top=1 bottom=75,
--- so the art is 198x74. Sheet size 1024x512: not stated anywhere in Blizzard code; inferred from the atlases on that
--- sheet (max right 1023, max bottom 506; the 2x sheet reaches 2047/1021), power-of-two. Blizzard's layout
--- (PlayerFrame.xml): PlayerFrame 232x100, AlternatePowerFrameTexture CENTER (0,-1.5), our bar at (85,-73) 124x9.
--- Art left in the frame = 116-99 = 17, art top = 51.5-37 = 14.5. The bar ends at x=209 in the frame = column 192 of
--- the art, rows 58.5..67.5; the right border column starts there. In the sheet: x = 808+192 = 1000, y = 1+58.5 = 59.5.
--- TICK_FRAME_X is that column's offset in the atlas (192); it is the one number to nudge (+/- a few px) if the slice
--- shows the bar's end or the outside of the frame instead of the border. 2px wide, like the colour core.
-local TICK_FRAME_X, TICK_FRAME_W, TICK_FRAME_Y = 192, 2, 58.5
-local SHEET_W, SHEET_H, SHEET_ID, ATLAS_L, ATLAS_T = 1024, 512, 4631591, 808, 1
 local bar, ticks = nil, {}
 -- Personal Resource Display: on Forever its AlternatePowerBar is the mana row whenever the main bar is not mana (Cat and
 -- Bear Form; Blizzard_PersonalResourceDisplay Camelot override). Our ticks live on our own child frame of that row.
@@ -177,8 +179,10 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     local size = S("fontSize")
     if barOn then size = math.min(size, BAR_FONT_MAX) end
     fs:SetFont(FontPath(), size, SChoice("outline")[3])
-    local c = (k == 0 and S("zeroRed")) and { 1, 0.2, 0.2 } or SChoice("color")[3]
-    fs:SetTextColor(c[1], c[2], c[3])
+    local r, g, b = 1, 0.2, 0.2 -- 0 in red
+    if not (k == 0 and S("zeroRed")) then r, g, b = HexRGB(S("color")) end
+    if not r then r, g, b = 1, 1, 1 end
+    fs:SetTextColor(r, g, b)
     local pos = CurMode() == 1 and S("textPos", 1) or 1 -- only the icon mode has a position
     fs:SetParent((barOn or floatOn) and overlay or f)
     fs:ClearAllPoints()
@@ -195,10 +199,8 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
--- c: an RGBA colour, "frame" (player frame border slice) or "prd" (the PRD's own shape, colour and width).
--- Returns the tick's width so the caller can centre it.
-local function TickLook(t, h, frameArt, c)
-    if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- no player frame art to cut here: white
+-- c: an RGBA colour, or "prd" (the PRD's own shape, colour and width). Returns the tick's width, to centre it.
+local function TickLook(t, h, c)
     if c == "prd" then
         local r, g, b = HexRGB(Opt("prdTickColor"))
         if not r then r, g, b = HexRGB(DEFAULTS.prdTickColor) end
@@ -218,17 +220,7 @@ local function TickLook(t, h, frameArt, c)
         t.core:SetSize(tw, h)
         return tw
     end
-    if c == "frame" then
-        local x0 = ATLAS_L + TICK_FRAME_X
-        local y0 = ATLAS_T + TICK_FRAME_Y
-        t.core:SetTexture(SHEET_ID)
-        t.core:SetTexCoord(x0 / SHEET_W, (x0 + TICK_FRAME_W) / SHEET_W, y0 / SHEET_H, (y0 + BAR_H) / SHEET_H)
-        t.core:SetSize(TICK_FRAME_W, BAR_H)
-        t.core:SetDesaturated(frameDesat)
-        t.core:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
-        return TICK_FRAME_W
-    end
-    t.core:SetColorTexture(c[1], c[2], c[3], c[4])
+    t.core:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
     t.core:SetTexCoord(0, 1, 0, 1)
     t.core:SetDesaturated(false)
     t.core:SetVertexColor(1, 1, 1)
@@ -237,7 +229,7 @@ local function TickLook(t, h, frameArt, c)
 end
 
 -- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
-local function PlaceTicks(host, list, show, w, h, frameArt, look)
+local function PlaceTicks(host, list, show, w, h, look)
     for i = 1, MAX_LABELS do
         local x = show and (i * cost / maxMana * w) -- only divides when show (maxMana > 0)
         local t = list[i]
@@ -246,7 +238,7 @@ local function PlaceTicks(host, list, show, w, h, frameArt, look)
                 t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2) }
                 list[i] = t
             end
-            local tw = TickLook(t, h, frameArt, look)
+            local tw = TickLook(t, h, look)
             t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - tw / 2, 0)
             t.core:Show()
         elseif t then
@@ -255,15 +247,18 @@ local function PlaceTicks(host, list, show, w, h, frameArt, look)
     end
 end
 
+local tickRGBA = { 0, 0, 0, 1 } -- the bar tick colour, reused (no allocation per layout)
 local function LayoutTicks()
     local ok = cost > 0 and maxMana > 0
-    local look = SChoice("tickColor", 3)[3]
-    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, true, look) end
-    if floatBar then PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), false, look) end
+    local r, g, b = HexRGB(S("tickColor", 3))
+    if not r then r, g, b = HexRGB(MODE_DEFAULTS[3].tickColor) end
+    tickRGBA[1], tickRGBA[2], tickRGBA[3] = r, g, b
+    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, tickRGBA) end
+    if floatBar then PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), tickRGBA) end
     if prdHost then
         local w, h = prdBar:GetWidth(), prdBar:GetHeight()
         if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
-        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false, "prd")
+        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, "prd")
     end
 end
 
@@ -329,7 +324,6 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
             local function resample()
                 SampleFrameColor()
                 if barArt and S("barStyle", 3) == STYLE_MATCH then ArtVisuals() end
-                if barArt and SChoice("tickColor", 3)[3] == "frame" then LayoutTicks() end -- regardless of Bar style
             end
             hooksecurefunc(t, "SetVertexColor", resample)
             if t.SetDesaturated then hooksecurefunc(t, "SetDesaturated", resample) end
@@ -337,12 +331,23 @@ local function HookFrameArt() -- once per texture: a later recolour of PlayerFra
     end
 end
 
+local function BarCustomRGB()
+    local r, g, b = HexRGB(S("barCustom", 3))
+    if not r then return HexRGB(MODE_DEFAULTS[3].barCustom) end
+    return r, g, b
+end
+
 local function BarVisuals()
-    local atlas = SChoice("barColor", 3)[3]
-    if atlas ~= barAtlas then barAtlas = atlas; bar:SetStatusBarTexture(atlas) end -- once per change: keeps the mask
-    local dark = S("barStyle", 3) == STYLE_DARK
+    if barAtlas ~= MANA_ATLAS then barAtlas = MANA_ATLAS; bar:SetStatusBarTexture(MANA_ATLAS) end -- once: keeps the mask
+    local k = S("barStyle", 3) == STYLE_DARK and DARK_FILL or 1
     local fill = bar:GetStatusBarTexture() -- our own fill keeps its colour in Match; PlayerFrame's textures are never touched
-    if fill then fill:SetVertexColor(dark and DARK_FILL or 1, dark and DARK_FILL or 1, dark and DARK_FILL or 1) end
+    if fill then -- Mana: the unit frame's mana art; Custom: the same art greyed and tinted
+        local custom = S("barColor", 3) == 2
+        local r, g, b = 1, 1, 1
+        if custom then r, g, b = BarCustomRGB() end
+        fill:SetDesaturated(custom)
+        fill:SetVertexColor(r * k, g * k, b * k)
+    end
     HookFrameArt()
     SampleFrameColor()
     ArtVisuals()
@@ -392,8 +397,9 @@ local function FloatVisuals()
     floatBar:SetSize(w, h)
     local path = TexturePath() -- an unregistered name renders LibSharedMedia's default; the stored name is kept
     if path ~= floatTex then floatTex = path; floatBar:SetStatusBarTexture(path) end
-    local c = SChoice("barColor", 3)[4]
-    floatBar:SetStatusBarColor(c[1], c[2], c[3])
+    local r, g, b = MANA_RGB[1], MANA_RGB[2], MANA_RGB[3]
+    if S("barColor", 3) == 2 then r, g, b = BarCustomRGB() end
+    floatBar:SetStatusBarColor(r, g, b)
     floatBg:SetColorTexture(0, 0, 0, S("bgAlpha", 3))
     for _, e in ipairs(floatEdges) do e:SetShown(S("border", 3)) end
     LayoutTicks()
@@ -519,8 +525,6 @@ end
 -- Safe in combat: plain values on our own non-secure frames. Only a mode switch (anchor/strata/parent) waits for
 -- PLAYER_REGEN_ENABLED.
 local function Apply()
-    local db = ShiftingPowerCountDB
-    if S("placement", 3) == 2 and S("tickColor", 3) == 4 and db and db.bar then db.bar.tickColor = 1 end -- Frame needs the player frame
     f:SetScale(Scale())
     icon:SetAlpha(Opt("mode") == 1 and S("iconAlpha") or 0)
     if bar then BarVisuals() end
@@ -703,7 +707,7 @@ InitSettings = function()
             (m and MODE_DEFAULTS[m] or DEFAULTS)[key])
         st:SetValueChangedCallback(function(_, v)
             Apply()
-            if key == "mode" or key == "placement" or key == "prdTickShape" then Repair() end
+            if key == "mode" or key == "placement" or key == "prdTickShape" or key == "barColor" then Repair() end
             if boxes[var] and type(v) == "number" then boxes[var]:SetText(Fmt(v)) end -- slider/CLI -> box
         end)
         settingObjs[var] = st
@@ -740,8 +744,9 @@ InitSettings = function()
         AttachBox(init, st, Var(key, m), lo, hi, step)
         return init
     end
-    -- Tick colour: the Frame choice cuts the player frame's border art, so only On player frame offers it.
-    local function tickChoices() return S("placement", 3) == 1 and CHOICES.tickColor or { unpack(CHOICES.tickColor, 1, 3) } end
+    local function swatch(m, key, name, tip) -- Blizzard's colour swatch: opens the colour picker, stores "aarrggbb"
+        return Settings.CreateColorSwatch(category, add(m, key, Settings.VarType.String, name), tip)
+    end
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("General",
         "What the addon shows. These apply to every display mode."))
@@ -759,8 +764,7 @@ InitSettings = function()
     check(nil, "prdTicks", "Cast ticks", "A tick at every multiple of the Shifting Power cost on the Personal "
         .. "Resource Display's mana row.")
     choice(nil, "prdTickShape", "Tick shape", "Bar: a plain line. Pip: Blizzard's Cooldown Manager marker.")
-    Settings.CreateColorSwatch(category, add(nil, "prdTickColor", Settings.VarType.String, "Tick colour"),
-        "Click to pick the colour of the ticks (bar or pip).")
+    swatch(nil, "prdTickColor", "Tick colour", "Click to pick the colour of the ticks (bar or pip).")
     slider(nil, "prdTickWidth", "Tick width", 1, 8, 1, "Width of the bar shape, in pixels."):AddShownPredicate(function()
         return Opt("prdTickShape") == 1
     end)
@@ -785,19 +789,21 @@ InitSettings = function()
         if m == 1 then row(slider(m, "iconAlpha", "Icon opacity", 0, 1, 0.05)) end
         if m == 3 then
             row(check(m, "ticks", "Show cast ticks", "A tick at every multiple of the Shifting Power cost, so each segment is one cast."))
-            row(choice(m, "tickColor", "Tick colour", "Tick colour. White, black and yellow: a plain line in that colour. "
-                .. "Frame (On player frame only): a slice of the player frame's own border art, greyed and tinted like it "
-                .. "(for example by DarkMode), no edges.", tickChoices))
+            row(swatch(m, "tickColor", "Tick colour", "Click to pick the colour of the cast ticks."))
             row(check(m, "barText", "Show count", "Show the number of casts on the bar."))
         end
         row(slider(m, "fontSize", "Number size", 8, 72, 1))
         row(mediaChoice(m, "font", "Number font", "font"))
         row(choice(m, "outline", "Number outline"))
-        row(choice(m, "color", "Number colour"))
+        row(swatch(m, "color", "Number colour", "Click to pick the colour of the number."))
         if m == 1 then row(choice(m, "textPos", "Number position")) end
         row(check(m, "zeroRed", "Show 0 in red"))
         if m == 3 then
-            row(choice(m, "barColor", "Bar colour", "Fill of the bar. On the player frame it is the unit frame's own bar art."))
+            row(choice(m, "barColor", "Bar colour", "Mana: the unit frame's own mana bar. Custom: pick any colour below "
+                .. "(on the player frame, the same bar art greyed and tinted)."))
+            local custom = swatch(m, "barCustom", "Custom colour", "Click to pick the bar's colour.")
+            row(custom)
+            custom:AddShownPredicate(function() return S("barColor", 3) == 2 end)
             row(choice(m, "barStyle", "Bar style", "Normal: the plain frame art. Match player frame: the new row's frame art "
                 .. "and well take the colour the player frame has (for example from the DarkMode addon). Dark: a fixed "
                 .. "near-black well, a dimmer fill and a darker copy of the frame art."), 1)
@@ -877,8 +883,8 @@ local function Set(key, v)
     Apply()
 end
 
-local USAGE = "(style commands act on the current Display mode) /spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | texture <name> | width <50-400> | height <4-40> | bgalpha <0-1> | border on|off | outline | color | pos | alpha <0-1>"
-    .. " | barcolor | tickcolor | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | prdtickshape bar|pip | prdtickcolor RRGGBB | prdtickwidth <1-8> | zero on|off | lock | unlock | reset"
+local USAGE = "(style commands act on the current Display mode) /spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | texture <name> | width <50-400> | height <4-40> | bgalpha <0-1> | border on|off | outline | color RRGGBB | pos | alpha <0-1>"
+    .. " | barcolor mana|RRGGBB | tickcolor RRGGBB | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | prdtickshape bar|pip | prdtickcolor RRGGBB | prdtickwidth <1-8> | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
@@ -896,10 +902,15 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         local v = tonumber(arg)
         if not v then return print(("Shifting Power Count: %s needs a number %s-%s"):format(cmd, lo, hi)) end
         Set(key, math.max(lo, math.min(hi, v)))
-    elseif cmd == "prdtickcolor" then
+    elseif CLI_HEX[cmd] or cmd == "barcolor" then
+        if cmd == "barcolor" and arg == "mana" then return Set("barColor", 1) end
         local hex = arg:match("^#?(%x%x%x%x%x%x)$")
-        if not hex then return print("Shifting Power Count: prdtickcolor takes a colour as RRGGBB, e.g. ff8000") end
-        Set("prdTickColor", "ff" .. hex:lower())
+        if not hex then
+            return print(("Shifting Power Count: %s takes a colour as RRGGBB, e.g. ff8000%s")
+                :format(cmd, cmd == "barcolor" and ", or mana" or ""))
+        end
+        if cmd == "barcolor" then Set("barCustom", "ff" .. hex:lower()); return Set("barColor", 2) end
+        Set(CLI_HEX[cmd], "ff" .. hex:lower())
     elseif cmd == "font" or cmd == "texture" then
         local kind = cmd == "font" and "font" or "statusbar"
         local all = LSM:List(kind)
@@ -910,9 +921,6 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
             :format(cmd, #all, table.concat(all, ", ", 1, math.min(3, #all))))
     elseif CLI_KEY[cmd] then
         local key = CLI_KEY[cmd]
-        if key == "tickColor" and arg == "frame" and S("placement", 3) == 2 then
-            return print("Shifting Power Count: the Frame tick colour needs Placement On player frame")
-        end
         local names = {}
         for i, e in ipairs(List(key, Where(key))) do
             if e[1] == arg then return Set(key, i) end

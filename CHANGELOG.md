@@ -11,6 +11,9 @@
   `/spcount prdticks on|off` or the panel checkbox.
 - Personal Resource Display ticks have their own section: shape Bar (width 1-8 px, default 2) or Pip (Blizzard's
   Cooldown Manager marker), coloured from a colour picker; `/spcount prdtickshape|prdtickcolor RRGGBB|prdtickwidth`.
+- Colours are colour pickers: number colour (every display), bar tick colour (default black) and bar colour (Mana, or
+  Custom with its own picker). The Frame tick colour is gone. Saved preset colours (v1.0.0) carry over as their exact
+  colour; Energy, Rage, Focus and Runic power become Custom in that colour, and a Frame tick colour becomes black.
 - The style section is titled after the selected Display: Icon Style, Number Style or Bar Style.
 
 ## v1.0.0

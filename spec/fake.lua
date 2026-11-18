@@ -42,6 +42,11 @@ function F.install(o)
         function t.SetAtlas(s, name) s.atlas = name end
         function t.SetStatusBarTexture(s, x) s.barTexture = x end
         function t.SetStatusBarColor(s, r, g, b) s.statusColor = { r, g, b } end
+        function t.GetStatusBarTexture(s) -- the bar's own fill texture, made on first use
+            local fill = rawget(s, "fill")
+            if not fill then fill = obj(); s.fill = fill end
+            return fill
+        end
         function t.SetMinMaxValues(s, a, b) s.min, s.max = a, b end
         function t.SetValue(s, v) s.value = v; s.values = (rawget(s, "values") or 0) + 1 end
         function t.SetFrameStrata(s, x) s.strata = x end
