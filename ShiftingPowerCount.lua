@@ -14,7 +14,7 @@ local LSM = LibStub("LibSharedMedia-3.0")
 
 -- Options live in ShiftingPowerCountDB (defaults filled at login): General keys at the top level, each display mode's
 -- look in its own table (MODE_KEY[mode]). Choice options store an index into CHOICES; fonts are LibSharedMedia names.
-local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickShape = 1, prdTickColor = "ffffffff",
+local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickShape = 1, prdTickColor = "ff000000",
     prdTickWidth = 2 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
@@ -201,7 +201,7 @@ local function TickLook(t, h, frameArt, c)
     if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- no player frame art to cut here: white
     if c == "prd" then
         local r, g, b = HexRGB(Opt("prdTickColor"))
-        if not r then r, g, b = 1, 1, 1 end
+        if not r then r, g, b = HexRGB(DEFAULTS.prdTickColor) end
         if Opt("prdTickShape") == 2 then
             local pw = h * PIP_W / PIP_H
             t.core:SetAtlas(PRD_PIP)
