@@ -18,11 +18,12 @@ local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, pr
     prdTickWidth = 2 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
+local SHAPE_BAR, SHAPE_PIP, SHAPE_FRAME = 1, 2, 3 -- tick shapes, as stored
 local WHITE = "ffffffff" -- colours are Blizzard colour-swatch strings, "aarrggbb"
 local MODE_DEFAULTS = {
     { scale = 1, iconAlpha = 0.35, fontSize = 20, font = FONT, outline = 1, color = WHITE, textPos = 1, zeroRed = true },
     { scale = 1, fontSize = 20, font = FONT, outline = 1, color = WHITE, zeroRed = true },
-    { placement = 1, ticks = true, tickColor = "ff000000", barText = true, fontSize = 20, font = FONT, outline = 1,
+    { placement = 1, ticks = true, tickShape = SHAPE_BAR, tickWidth = 2, tickColor = "ff000000", barText = true, fontSize = 20, font = FONT, outline = 1,
         color = WHITE, zeroRed = true, barColor = 1, barCustom = "ff008cff", barStyle = 1, width = 150, height = 12, texture = "Blizzard", bgAlpha = 0.5,
         border = true, textPos = 1 }, -- width .. textPos: the floating bar only
 }
@@ -36,7 +37,8 @@ local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM
 local MANA_ATLAS, MANA_RGB = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana", { 0, 0.55, 1 } -- verified Forever
 local CHOICES = { -- DB key -> { CLI name, panel label, value (outline flag) }
     mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar" } },
-    prdTickShape = { { "bar", "Bar" }, { "pip", "Pip" } },
+    -- value: what is stored (Bar 1 and Pip 2 since v1.1.0; Frame added as 3) when it differs from the list position
+    tickShape = { { "frame", "Frame", value = 3 }, { "bar", "Bar", value = 1 }, { "pip", "Pip", value = 2 } },
     barColor = { { "mana", "Mana" }, { "custom", "Custom" } }, -- Custom: barCustom, a colour swatch
     outline = { { "none", "None", "" }, { "outline", "Outline", "OUTLINE" }, { "thick", "Thick outline", "THICKOUTLINE" } },
     barStyle = { { "normal", "Normal" }, { "match", "Match player frame" }, { "dark", "Dark" } },
@@ -45,12 +47,14 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (outline flag) }
     barTextPos = { { "center", "Center" }, { "left", "Left" }, { "right", "Right" }, { "above", "Above" }, { "below", "Below" } },
 }
 local CLI_HEX = { color = "color", tickcolor = "tickColor", prdtickcolor = "prdTickColor" } -- RRGGBB arguments
-local CLI_KEY = { mode = "mode", outline = "outline", pos = "textPos", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape" }
+CHOICES.prdTickShape = CHOICES.tickShape
+local CLI_KEY = { mode = "mode", outline = "outline", pos = "textPos", dark = "barStyle", placement = "placement",
+    prdtickshape = "prdTickShape", tickshape = "tickShape" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks",
     border = "border" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 },
     width = { "width", 50, 400 }, height = { "height", 4, 40 }, bgalpha = { "bgAlpha", 0, 1 },
-    prdtickwidth = { "prdTickWidth", 1, 8 } }
+    prdtickwidth = { "prdTickWidth", 1, 8 }, tickwidth = { "tickWidth", 1, 8 } }
 local settingObjs, category = {}, nil
 local InitSettings
 
@@ -160,6 +164,9 @@ local prdBar, prdHost, prdTicks = nil, nil, {}
 -- PRD pip: Blizzard's Cooldown Manager bar marker (Blizzard_CooldownViewer), greyed and tinted with the tick colour.
 local PRD_PIP = "UI-HUD-CoolDownManager-Bar-Pip"
 local PIP_W, PIP_H = 10, 23 -- the pip atlas's aspect (UI-HUD-CoolDownManager-Bar-Pip)
+-- Frame: the experience bar's own segment divider (Blizzard_StatusTrackingBar StatusBarDividerTemplate: a 3x10 frame
+-- the atlas fills), stretched to the row's height like Blizzard does. Textured: it takes no colour.
+local XP_DIVIDER, DIVIDER_W = "ui-hud-experiencebar-divider", 3
 local barAtlas
 local overlay, barArt, barBg -- overlay: label host above the bar (outside the masked fill); art/bg: our own textures
 local barOn = false -- the display actually realised (mode asked for AND PlayerFrame usable)
@@ -199,37 +206,32 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
--- c: an RGBA colour, or "prd" (the PRD's own shape, colour and width). Returns the tick's width, to centre it.
-local function TickLook(t, h, c)
-    if c == "prd" then
-        local r, g, b = HexRGB(Opt("prdTickColor"))
-        if not r then r, g, b = HexRGB(DEFAULTS.prdTickColor) end
-        if Opt("prdTickShape") == 2 then
-            local pw = h * PIP_W / PIP_H
-            t.core:SetAtlas(PRD_PIP)
-            t.core:SetSize(pw, h)
-            t.core:SetDesaturated(true)
-            t.core:SetVertexColor(r, g, b)
-            return pw
-        end
-        local tw = Opt("prdTickWidth")
-        t.core:SetColorTexture(r, g, b, 1)
-        t.core:SetTexCoord(0, 1, 0, 1)
+-- One tick's look: shape Frame (the XP bar divider), Pip (tinted with rgb) or Bar (rgb, tw wide). Returns its width.
+local function TickLook(t, h, shape, rgb, tw)
+    if shape == SHAPE_FRAME then
+        t.core:SetAtlas(XP_DIVIDER)
         t.core:SetDesaturated(false)
         t.core:SetVertexColor(1, 1, 1)
-        t.core:SetSize(tw, h)
-        return tw
+        t.core:SetSize(DIVIDER_W, h)
+        return DIVIDER_W
+    elseif shape == SHAPE_PIP then
+        local pw = h * PIP_W / PIP_H
+        t.core:SetAtlas(PRD_PIP)
+        t.core:SetDesaturated(true)
+        t.core:SetVertexColor(rgb[1], rgb[2], rgb[3])
+        t.core:SetSize(pw, h)
+        return pw
     end
-    t.core:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+    t.core:SetColorTexture(rgb[1], rgb[2], rgb[3], 1)
     t.core:SetTexCoord(0, 1, 0, 1)
     t.core:SetDesaturated(false)
     t.core:SetVertexColor(1, 1, 1)
-    t.core:SetSize(2, h)
-    return 2
+    t.core:SetSize(tw, h)
+    return tw
 end
 
 -- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
-local function PlaceTicks(host, list, show, w, h, look)
+local function PlaceTicks(host, list, show, w, h, shape, rgb, tw)
     for i = 1, MAX_LABELS do
         local x = show and (i * cost / maxMana * w) -- only divides when show (maxMana > 0)
         local t = list[i]
@@ -238,8 +240,8 @@ local function PlaceTicks(host, list, show, w, h, look)
                 t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2) }
                 list[i] = t
             end
-            local tw = TickLook(t, h, look)
-            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - tw / 2, 0)
+            local width = TickLook(t, h, shape, rgb, tw)
+            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - width / 2, 0)
             t.core:Show()
         elseif t then
             t.core:Hide()
@@ -247,18 +249,26 @@ local function PlaceTicks(host, list, show, w, h, look)
     end
 end
 
-local tickRGBA = { 0, 0, 0, 1 } -- the bar tick colour, reused (no allocation per layout)
+local barRGB, prdRGB = { 0, 0, 0 }, { 0, 0, 0 } -- tick colours, reused (no allocation per layout)
+local function ReadRGB(out, hex, fallback) -- a swatch string into out; a malformed one takes the default
+    local r, g, b = HexRGB(hex)
+    if not r then r, g, b = HexRGB(fallback) end
+    out[1], out[2], out[3] = r, g, b
+    return out
+end
 local function LayoutTicks()
     local ok = cost > 0 and maxMana > 0
-    local r, g, b = HexRGB(S("tickColor", 3))
-    if not r then r, g, b = HexRGB(MODE_DEFAULTS[3].tickColor) end
-    tickRGBA[1], tickRGBA[2], tickRGBA[3] = r, g, b
-    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, tickRGBA) end
-    if floatBar then PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), tickRGBA) end
+    local shape, tw = S("tickShape", 3), S("tickWidth", 3)
+    ReadRGB(barRGB, S("tickColor", 3), MODE_DEFAULTS[3].tickColor)
+    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, shape, barRGB, tw) end
+    if floatBar then
+        PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), shape, barRGB, tw)
+    end
     if prdHost then
         local w, h = prdBar:GetWidth(), prdBar:GetHeight()
         if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
-        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, "prd")
+        ReadRGB(prdRGB, Opt("prdTickColor"), DEFAULTS.prdTickColor)
+        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, Opt("prdTickShape"), prdRGB, Opt("prdTickWidth"))
     end
 end
 
@@ -707,7 +717,9 @@ InitSettings = function()
             (m and MODE_DEFAULTS[m] or DEFAULTS)[key])
         st:SetValueChangedCallback(function(_, v)
             Apply()
-            if key == "mode" or key == "placement" or key == "prdTickShape" or key == "barColor" then Repair() end
+            if key == "mode" or key == "placement" or key == "prdTickShape" or key == "tickShape" or key == "barColor" then
+                Repair()
+            end
             if boxes[var] and type(v) == "number" then boxes[var]:SetText(Fmt(v)) end -- slider/CLI -> box
         end)
         settingObjs[var] = st
@@ -719,7 +731,7 @@ InitSettings = function()
     local function choice(m, key, name, tip, list) -- list: optional function giving the CHOICES entries to offer
         local function opts()
             local c = Settings.CreateControlTextContainer()
-            for i, e in ipairs(list and list() or CHOICES[key]) do c:Add(i, e[2]) end
+            for i, e in ipairs(list and list() or CHOICES[key]) do c:Add(e.value or i, e[2]) end
             return c:GetData()
         end
         return Settings.CreateDropdown(category, add(m, key, Settings.VarType.Number, name), opts, tip)
@@ -744,6 +756,8 @@ InitSettings = function()
         AttachBox(init, st, Var(key, m), lo, hi, step)
         return init
     end
+    local SHAPE_TIP = "Frame: the experience bar's own divider. Bar: a plain line in your colour and width. "
+        .. "Pip: Blizzard's Cooldown Manager marker in your colour."
     local function swatch(m, key, name, tip) -- Blizzard's colour swatch: opens the colour picker, stores "aarrggbb"
         return Settings.CreateColorSwatch(category, add(m, key, Settings.VarType.String, name), tip)
     end
@@ -763,10 +777,12 @@ InitSettings = function()
         "Cast ticks on the Personal Resource Display's mana row (shown in Cat and Bear Form), in every display mode."))
     check(nil, "prdTicks", "Cast ticks", "A tick at every multiple of the Shifting Power cost on the Personal "
         .. "Resource Display's mana row.")
-    choice(nil, "prdTickShape", "Tick shape", "Bar: a plain line. Pip: Blizzard's Cooldown Manager marker.")
-    swatch(nil, "prdTickColor", "Tick colour", "Click to pick the colour of the ticks (bar or pip).")
+    choice(nil, "prdTickShape", "Tick shape", SHAPE_TIP)
+    swatch(nil, "prdTickColor", "Tick colour", "Click to pick the colour of the ticks (bar or pip)."):AddShownPredicate(function()
+        return Opt("prdTickShape") ~= SHAPE_FRAME
+    end)
     slider(nil, "prdTickWidth", "Tick width", 1, 8, 1, "Width of the bar shape, in pixels."):AddShownPredicate(function()
-        return Opt("prdTickShape") == 1
+        return Opt("prdTickShape") == SHAPE_BAR
     end)
 
     local STYLE_HEADER = { "Icon Style", "Number Style", "Bar Style" }
@@ -789,7 +805,13 @@ InitSettings = function()
         if m == 1 then row(slider(m, "iconAlpha", "Icon opacity", 0, 1, 0.05)) end
         if m == 3 then
             row(check(m, "ticks", "Show cast ticks", "A tick at every multiple of the Shifting Power cost, so each segment is one cast."))
-            row(swatch(m, "tickColor", "Tick colour", "Click to pick the colour of the cast ticks."))
+            row(choice(m, "tickShape", "Tick shape", SHAPE_TIP))
+            local tickColor = swatch(m, "tickColor", "Tick colour", "Click to pick the colour of the cast ticks (bar or pip).")
+            row(tickColor)
+            tickColor:AddShownPredicate(function() return S("tickShape", 3) ~= SHAPE_FRAME end)
+            local tickWidth = slider(m, "tickWidth", "Tick width", 1, 8, 1, "Width of the bar shape, in pixels.")
+            row(tickWidth)
+            tickWidth:AddShownPredicate(function() return S("tickShape", 3) == SHAPE_BAR end)
             row(check(m, "barText", "Show count", "Show the number of casts on the bar."))
         end
         row(slider(m, "fontSize", "Number size", 8, 72, 1))
@@ -884,7 +906,7 @@ local function Set(key, v)
 end
 
 local USAGE = "(style commands act on the current Display mode) /spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | texture <name> | width <50-400> | height <4-40> | bgalpha <0-1> | border on|off | outline | color RRGGBB | pos | alpha <0-1>"
-    .. " | barcolor mana|RRGGBB | tickcolor RRGGBB | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | prdtickshape bar|pip | prdtickcolor RRGGBB | prdtickwidth <1-8> | zero on|off | lock | unlock | reset"
+    .. " | barcolor mana|RRGGBB | tickshape frame|bar|pip | tickcolor RRGGBB | tickwidth <1-8> | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | prdtickshape frame|bar|pip | prdtickcolor RRGGBB | prdtickwidth <1-8> | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
@@ -923,7 +945,7 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         local key = CLI_KEY[cmd]
         local names = {}
         for i, e in ipairs(List(key, Where(key))) do
-            if e[1] == arg then return Set(key, i) end
+            if e[1] == arg then return Set(key, e.value or i) end
             names[#names + 1] = e[1]
         end
         print("Shifting Power Count: " .. cmd .. " is one of " .. table.concat(names, ", "))

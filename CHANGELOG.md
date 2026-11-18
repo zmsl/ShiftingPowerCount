@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- Tick shape Frame: the experience bar's own divider, for the Personal Resource Display and the bar (player frame and
+  floating). The bar's ticks now have Tick shape (Frame, Bar, Pip) and Tick width like the Personal Resource Display's;
+  Bar and Pip show the colour picker. `/spcount tickshape|tickwidth`, `prdtickshape frame`.
+
 ## v1.1.0
 - Bar mode has a Placement: On player frame (as before) or Floating, a movable, lockable bar you style (width, height,
   texture from LibSharedMedia, background opacity, border, count position). When the player frame is hidden or
