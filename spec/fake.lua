@@ -40,6 +40,7 @@ function F.install(o)
         function t.CreateMaskTexture() return obj() end
         function t.SetAtlas(s, name) s.atlas = name end
         function t.SetStatusBarTexture(s, x) s.barTexture = x end
+        function t.SetStatusBarColor(s, r, g, b) s.statusColor = { r, g, b } end
         function t.SetMinMaxValues(s, a, b) s.min, s.max = a, b end
         function t.SetValue(s, v) s.value = v; s.values = (rawget(s, "values") or 0) + 1 end
         function t.SetFrameStrata(s, x) s.strata = x end
@@ -55,6 +56,7 @@ function F.install(o)
         local fr = obj()
         fr.parent = parent
         if kind == "EditBox" then w.boxes[#w.boxes + 1] = fr
+        elseif name == "ShiftingPowerCountFloatingBar" then w.floatBar = fr
         elseif kind == "StatusBar" then w.bar = fr
         elseif name == "ShiftingPowerCountOverlay" then w.overlay = fr
         elseif name == "ShiftingPowerCountPRDTicks" then w.prdHost = fr

@@ -1,6 +1,6 @@
 # LibSharedMedia-3.0 licence note
 
-No licence file upstream; the header of `LibSharedMedia-3.0.lua` states:
+No licence file upstream; the full LGPL v2.1 text is beside this note in `LICENSE-LGPL-2.1.txt`. The header of `LibSharedMedia-3.0.lua` states:
 
 ```
 --[[
