@@ -6,7 +6,7 @@ list=$(unzip -Z1 "$zip")
 fail=0
 need() { grep -qx "$1" <<<"$list" || { echo "missing: $1"; fail=1; }; }
 for f in ShiftingPowerCount.toc ShiftingPowerCount.lua; do need "ShiftingPowerCount/$f"; done
-for bad in '/spec/' '/tests/' '/tools/' '/scripts/' '/\.github/' 'Makefile$' 'mise\.toml$' '\.luacheckrc$' '/\.'; do
+for bad in '/spec/' '/docs/' '/tests/' '/tools/' '/scripts/' '/\.github/' 'Makefile$' 'mise\.toml$' '\.luacheckrc$' '/\.'; do
     if grep -qE "$bad" <<<"$list"; then echo "unexpected: $(grep -E "$bad" <<<"$list" | head -3)"; fail=1; fi
 done
 ver=$(basename "$zip" .zip); ver=${ver#ShiftingPowerCount-}

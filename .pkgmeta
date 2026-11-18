@@ -11,6 +11,7 @@ ignore:
     - README.md
     - CHANGELOG.md
     - spec
+    - docs
     - tools
     - scripts
     - .github
