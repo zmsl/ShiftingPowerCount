@@ -57,6 +57,7 @@ function F.install(o)
         if kind == "EditBox" then w.boxes[#w.boxes + 1] = fr
         elseif kind == "StatusBar" then w.bar = fr
         elseif name == "ShiftingPowerCountOverlay" then w.overlay = fr
+        elseif name == "ShiftingPowerCountPRDTicks" then w.prdHost = fr
         else w.frame = fr end
         return fr
     end
@@ -71,6 +72,17 @@ function F.install(o)
         function pf.IsShown() return w.pfShown ~= false end
         _G.PlayerFrame = pf
         w.playerFrame = pf
+    end
+    -- Stub of Blizzard's Personal Resource Display: its AlternatePowerBar is the mana row in Cat/Bear Form (Forever).
+    if o.prd then
+        local alt = obj()
+        w.prdW, w.prdH = o.prd[1], o.prd[2]
+        function alt.GetWidth() return w.prdW end
+        function alt.GetHeight() return w.prdH end
+        _G.PersonalResourceDisplayFrame = { AlternatePowerBar = alt }
+        w.prdBar = alt
+    else
+        _G.PersonalResourceDisplayFrame = nil
     end
     _G.UIParent = {}
     _G.hooksecurefunc = function(t, name, fn) -- post-hook: runs after the original, like the client's

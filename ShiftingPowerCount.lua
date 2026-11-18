@@ -13,7 +13,7 @@ local isSecret = issecretvalue or function() return false end
 -- Options live in ShiftingPowerCountDB (defaults filled at login). Choice options store an index into CHOICES.
 local DEFAULTS = { mode = 1, scale = 1, iconAlpha = 0.35, zeroRed = true, locked = false,
     fontSize = 20, font = 1, outline = 1, color = 1, textPos = 1, ticks = true, barColor = 1, barText = true,
-    barStyle = 1, tickColor = 1, catOnly = true }
+    barStyle = 1, tickColor = 1, catOnly = true, prdTicks = true }
 local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM = 1)
 local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
@@ -33,7 +33,7 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
 }
 local CLI_KEY = { mode = "mode", font = "font", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
     tickcolor = "tickColor", dark = "barStyle" }
-local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly" }
+local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
 local settingObjs, category = {}, nil
 local InitSettings
@@ -80,6 +80,9 @@ local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", 
 local TICK_FRAME_X, TICK_FRAME_W, TICK_FRAME_Y = 192, 2, 58.5
 local SHEET_W, SHEET_H, SHEET_ID, ATLAS_L, ATLAS_T = 1024, 512, 4631591, 808, 1
 local bar, ticks = nil, {}
+-- Personal Resource Display: on Forever its AlternatePowerBar is the mana row whenever the main bar is not mana (Cat and
+-- Bear Form; Blizzard_PersonalResourceDisplay Camelot override). Our ticks live on our own child frame of that row.
+local prdBar, prdHost, prdTicks = nil, nil, {}
 local barAtlas
 local overlay, barArt, barBg -- overlay: label host above the bar (outside the masked fill); art/bg: our own textures
 local barOn = false -- the display actually realised (mode asked for AND PlayerFrame usable)
@@ -111,8 +114,9 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
-local function TickLook(t) -- colour ticks, or the frame-art slice mirroring PlayerFrame's desaturation and colour
+local function TickLook(t, h, frameArt) -- colour ticks, or the frame-art slice mirroring PlayerFrame's desaturation and colour
     local c = Choice("tickColor")[3]
+    if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- the PRD has no border art to cut: white
     if c == "frame" then
         local x0 = ATLAS_L + TICK_FRAME_X
         local y0 = ATLAS_T + TICK_FRAME_Y
@@ -129,29 +133,27 @@ local function TickLook(t) -- colour ticks, or the frame-art slice mirroring Pla
     t.core:SetTexCoord(0, 1, 0, 1)
     t.core:SetDesaturated(false)
     t.core:SetVertexColor(1, 1, 1)
-    t.core:SetSize(2, BAR_H)
+    t.core:SetSize(2, h)
+    t.l:SetSize(1, h)
+    t.r:SetSize(1, h)
     t.l:SetColorTexture(edge, edge, edge, 0.8)
     t.r:SetColorTexture(edge, edge, edge, 0.8)
     return true
 end
 
-local function LayoutTicks() -- one tick per Shifting Power cost: the segments are casts. Plain out-of-combat numbers.
-    if not bar then return end
-    local show = Opt("ticks") and cost > 0 and maxMana > 0
+-- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
+local function PlaceTicks(host, list, show, w, h, frameArt)
     for i = 1, MAX_LABELS do
-        local x = show and (i * cost / maxMana * BAR_W) -- only divides when show (maxMana > 0)
-        local t = ticks[i]
-        if x and x < BAR_W - 0.5 then
+        local x = show and (i * cost / maxMana * w) -- only divides when show (maxMana > 0)
+        local t = list[i]
+        if x and x < w - 0.5 then
             if not t then -- a 2px core with a 1px edge on each side, full row height
-                t = { core = bar:CreateTexture(nil, "OVERLAY", nil, 2), l = bar:CreateTexture(nil, "OVERLAY", nil, 1),
-                    r = bar:CreateTexture(nil, "OVERLAY", nil, 1) }
-                t.core:SetSize(2, BAR_H)
-                t.l:SetSize(1, BAR_H)
-                t.r:SetSize(1, BAR_H)
-                ticks[i] = t
+                t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2), l = host:CreateTexture(nil, "OVERLAY", nil, 1),
+                    r = host:CreateTexture(nil, "OVERLAY", nil, 1) }
+                list[i] = t
             end
-            local edges = TickLook(t)
-            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", bar, "LEFT", x - 1, 0)
+            local edges = TickLook(t, h, frameArt)
+            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - 1, 0)
             t.l:ClearAllPoints(); t.l:SetPoint("RIGHT", t.core, "LEFT", 0, 0)
             t.r:ClearAllPoints(); t.r:SetPoint("LEFT", t.core, "RIGHT", 0, 0)
             t.core:Show()
@@ -160,6 +162,25 @@ local function LayoutTicks() -- one tick per Shifting Power cost: the segments a
             t.core:Hide(); t.l:Hide(); t.r:Hide()
         end
     end
+end
+
+local function LayoutTicks()
+    local ok = cost > 0 and maxMana > 0
+    if bar then PlaceTicks(bar, ticks, Opt("ticks") and ok, BAR_W, BAR_H, true) end
+    if prdHost then
+        local w, h = prdBar:GetWidth(), prdBar:GetHeight()
+        if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
+        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false)
+    end
+end
+
+local function HookPRD() -- once: our tick frame on the PRD mana row; it hides and scales with the row
+    local prd = _G.PersonalResourceDisplayFrame
+    if prdHost or not (prd and prd.AlternatePowerBar) then return end
+    prdBar = prd.AlternatePowerBar
+    prdHost = CreateFrame("Frame", "ShiftingPowerCountPRDTicks", prdBar)
+    prdHost:SetAllPoints(prdBar)
+    prdHost:SetScript("OnSizeChanged", LayoutTicks) -- Edit Mode width/height
 end
 
 -- Match style: read (never write) what PlayerFrame's art carries. DarkMode (D4KiR) greys a texture with
@@ -270,6 +291,7 @@ local function Restyle() for k, fs in pairs(labels) do Style(fs, k) end end
 local function ApplyVisibility()
     local show = isKnown and catOk
     f:SetShown(show)
+    if prdHost then prdHost:SetShown(show) end
     if barOn then
         bar:SetShown(show)
         overlay:SetShown(show)
@@ -332,6 +354,7 @@ local function Apply()
         end
     end
     Restyle() -- font, colour, text visibility: live even while a mode switch is pending
+    LayoutTicks()
 end
 
 local function Label(k)
@@ -365,7 +388,8 @@ local function Rebuild()
     if isSecret(m) or c <= 0 or m <= 0 then return end -- guard every divisor
 
     cost, maxMana = c, m
-    if bar then bar:SetMinMaxValues(0, m); LayoutTicks() end
+    if bar then bar:SetMinMaxValues(0, m) end
+    LayoutTicks()
     n = math.min(math.floor(m / c), MAX_LABELS)
     for k = 0, MAX_LABELS do
         local fs = Label(k)
@@ -512,9 +536,12 @@ InitSettings = function()
     Settings.CreateCheckbox(category, add("ticks", Settings.VarType.Boolean, "Bar: show cast ticks"),
         "A tick at every multiple of the Shifting Power cost, so each segment is one cast.")
     choice("tickColor", "Bar: tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. Frame: a slice of the player frame's "
-        .. "own border art, greyed and tinted like it (for example by DarkMode), no edges.")
+        .. "own border art, greyed and tinted like it (for example by DarkMode), no edges; white on the Personal Resource Display.")
     Settings.CreateCheckbox(category, add("barText", Settings.VarType.Boolean, "Bar: show count"),
         "Show the number of casts on the bar.")
+    Settings.CreateCheckbox(category, add("prdTicks", Settings.VarType.Boolean, "Personal Resource Display: cast ticks"),
+        "A tick at every multiple of the Shifting Power cost on the Personal Resource Display's mana row (Cat and Bear Form), "
+        .. "in every display mode. Uses the tick colour.")
     Settings.RegisterAddOnCategory(category)
 end
 
@@ -540,6 +567,7 @@ f:SetScript("OnEvent", function(_, event)
         for k, v in pairs(DEFAULTS) do
             if ShiftingPowerCountDB[k] == nil then ShiftingPowerCountDB[k] = v end
         end
+        HookPRD()
         local pos = ShiftingPowerCountDB.pos
         f:ClearAllPoints()
         if pos then f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else f:SetPoint("CENTER", 0, -150) end
@@ -550,6 +578,7 @@ f:SetScript("OnEvent", function(_, event)
         if ShiftingPowerCountDB then UpdateForm() end
         return
     elseif event == "PLAYER_ENTERING_WORLD" and ShiftingPowerCountDB then
+        HookPRD()
         Apply() -- PlayerFrame is up now
         UpdateForm()
     elseif event == "PLAYER_REGEN_ENABLED" and pendingLayout then
@@ -566,7 +595,7 @@ local function Set(key, v)
 end
 
 local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font | outline | color | pos | alpha <0-1>"
-    .. " | barcolor | tickcolor | dark normal|match|dark | catonly on|off | ticks on|off | bartext on|off | zero on|off | lock | unlock | reset"
+    .. " | barcolor | tickcolor | dark normal|match|dark | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)

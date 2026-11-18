@@ -428,3 +428,49 @@ describe("number boxes", function()
         assert.equal("1", box:GetText())
     end)
 end)
+
+describe("ticks on the Personal Resource Display mana row", function()
+    local function cores(host)
+        local r = {}
+        for _, t in ipairs(rawget(host, "textures") or {}) do
+            if rawget(t, "size") and t.size[1] == 2 and not rawget(t, "hidden") then r[#r + 1] = t end
+        end
+        return r
+    end
+    local function xs(host) local r = {}; for i, t in ipairs(cores(host)) do r[i] = t.point[4] + 1 end; return r end
+
+    it("a tick at every multiple of the cost across the row's width and height, in any display mode", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        assert.equal(w.prdBar, w.prdHost.parent) -- our own child frame of the PRD row, never the row's textures
+        assert.same({ 40, 80, 120, 160 }, xs(w.prdHost))
+        assert.same({ 2, 10 }, cores(w.prdHost)[1].size)
+        assert.is_nil(rawget(w.prdBar, "textures"))
+        slash("mode bar")
+        assert.same({ 40, 80, 120, 160 }, xs(w.prdHost))
+    end)
+    it("follows an Edit Mode resize of the row", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        w.prdW, w.prdH = 100, 6
+        w.prdHost.scripts.OnSizeChanged(w.prdHost, 100, 6)
+        assert.same({ 20, 40, 60, 80 }, xs(w.prdHost))
+        assert.same({ 2, 6 }, cores(w.prdHost)[1].size)
+    end)
+    it("prdticks off hides them, the panel has the checkbox; Frame colour falls back to white there", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        slash("prdticks off")
+        assert.same({}, xs(w.prdHost))
+        slash("prdticks on")
+        assert.equal(4, #xs(w.prdHost))
+        assert.is_table(w.settings.controls.prdTicks)
+        slash("tickcolor frame")
+        assert.same({ 1, 1, 1, 0.9 }, cores(w.prdHost)[1].color4)
+    end)
+    it("hidden outside Cat Form with the rest of the display; no PRD, no error", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        w.form = 5
+        F.fire("UPDATE_SHAPESHIFT_FORM")
+        assert.is_true(w.prdHost.hidden)
+        local w2 = start({ cost = 400, max = 2000 })
+        assert.is_nil(w2.prdHost)
+    end)
+end)
