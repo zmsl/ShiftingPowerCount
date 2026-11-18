@@ -9,6 +9,7 @@ function F.install(o)
     local function obj()
         local t = { scripts = {} }
         function t.SetAlpha(s, a) s.alpha = a end
+        function t.EnableMouse(s, v) s.mouse = v end
         function t.SetScript(s, n, fn) s.scripts[n] = fn end
         function t.SetText(s, x) s.text = x end
         function t.GetText(s) return s.text end
@@ -159,7 +160,7 @@ function F.install(o)
             -- Blizzard's mixin defaults for InitFrame/Resetter, overridden per instance
             return control(st, { kind = "slider", opts = o, init = init({ InitFrame = function() end, Resetter = function() end }) })
         end,
-        CreateDropdown = function(_, st, fn) return control(st, { kind = "dropdown", opts = fn(), optsFn = fn, init = init({}) }) end,
+        CreateDropdown = function(_, st, fn, tip) return control(st, { kind = "dropdown", opts = fn(), optsFn = fn, tip = tip, init = init({}) }) end,
         CreateCheckbox = function(_, st) return control(st, { kind = "checkbox", init = init({}) }) end,
         OpenToCategory = function(id) reg.opened = id end,
     }

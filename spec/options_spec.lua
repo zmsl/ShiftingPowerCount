@@ -587,4 +587,18 @@ describe("General and Style page", function()
         assert.is_true(#w.printed < 200)
         assert.is_truthy(w.printed:find("Arial Narrow", 1, true))
     end)
+
+    it("font and texture dropdowns list a stored name LibSharedMedia does not know", function()
+        local w = start({})
+        ShiftingPowerCountDB.icon.font = "Gone Font"
+        ShiftingPowerCountDB.bar.texture = "Gone Tex"
+        local function has(v, name)
+            for _, o in ipairs(w.settings.controls[v].optsFn()) do
+                if o.value == name then return true end
+            end
+        end
+        assert.is_true(has("SPC_ICON_FONT", "Gone Font"))
+        assert.is_true(has("SPC_BAR_TEXTURE", "Gone Tex"))
+        assert.is_true(has("SPC_ICON_FONT", "Arial Narrow")) -- the listed ones stay
+    end)
 end)

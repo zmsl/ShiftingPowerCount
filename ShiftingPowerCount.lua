@@ -29,7 +29,7 @@ local SCHEMA = 1
 local CAT_FORM = 1 -- GetShapeshiftFormID() of Cat Form (Blizzard DRUID_CAT_FORM = 1)
 local BAR_ATLAS = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" -- + Mana / Energy / Rage / Focus / RunicPower (verified Forever)
 local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outline flag / rgb) }
-    mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar on player frame" } },
+    mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar" } },
     tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
         { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana", { 0, 0.55, 1 } }, { "energy", "Energy", BAR_ATLAS .. "Energy", { 1, 0.85, 0.1 } },
@@ -379,7 +379,7 @@ end
 local function MakeFloat()
     floatBar = CreateFrame("StatusBar", "ShiftingPowerCountFloatingBar", UIParent)
     floatBar:SetMovable(true)
-    floatBar:EnableMouse(true)
+    floatBar:EnableMouse(not Opt("locked")) -- a locked bar is click-through
     floatBar:RegisterForDrag("LeftButton")
     floatBar:SetClampedToScreen(true)
     floatBar:SetMinMaxValues(0, math.max(maxMana, 1)) -- unknown max: empty until the first out-of-combat rebuild
@@ -446,6 +446,8 @@ local function UpdateForm()
     end
 end
 
+local Repair -- defined with the panel; Layout calls it so the open panel follows what is realised
+
 -- Which display Bar mode asks for: the player-frame row (Placement 1 and PlayerFrame usable) or else the floating bar.
 local function Want()
     if Opt("mode") ~= 3 then return false, false end
@@ -488,6 +490,7 @@ local function Layout()
     end
     Restyle()
     if barOn or floatOn then ApplyVisibility() end
+    Repair()
 end
 
 -- Safe in combat: plain values on our own non-secure frames. Only a mode switch (anchor/strata/parent) waits for
@@ -498,7 +501,7 @@ local function Apply()
     f:SetScale(Scale())
     icon:SetAlpha(Opt("mode") == 1 and S("iconAlpha") or 0)
     if bar then BarVisuals() end
-    if floatBar then FloatVisuals() end
+    if floatBar then FloatVisuals(); floatBar:EnableMouse(not Opt("locked")) end
     if Opt("catOnly") ~= lastCatOnly then lastCatOnly = Opt("catOnly"); UpdateForm() end
     local want, wantFloat = Want()
     if want ~= barOn or wantFloat ~= floatOn then
@@ -586,6 +589,7 @@ f:SetScript("OnDragStop", function(self)
 end)
 
 local function ResetPos() -- the frame the current display shows
+    if barOn then return print("Shifting Power Count: nothing to move on the player frame") end
     if floatOn then
         ShiftingPowerCountDB.barPos = nil
         PlaceFloat()
@@ -650,11 +654,18 @@ end
 -- Options > AddOns panel (Settings API, verified on Forever). Each setting is registered against the table that holds
 -- it (General: the top level; Style: its mode's table), so the panel and the CLI write the same field; the value
 -- callback applies the change live. Style rows of every mode exist; shown predicates keep only the selected mode's.
-local function Repair() -- the open panel re-evaluates the shown predicates
+Repair = function() -- the open panel re-evaluates the shown predicates
     if SettingsInbound and SettingsInbound.RepairDisplay then SettingsInbound.RepairDisplay() end
 end
 local function ModeShown(m) return function() return CurMode() == m end end
-local function PlacementShown(p) return function() return S("placement", 3) == p end end
+-- The fallback (Placement 1, PlayerFrame unavailable) shows the floating bar, so it gets the floating rows (p 2).
+local function PlacementShown(p)
+    return function()
+        local pl = S("placement", 3)
+        if p == 2 then return pl == 2 or floatOn end
+        return pl == 1 and not floatOn
+    end
+end
 local function Floats() return not barOn end -- something to move or lock: everything but the player-frame row
 
 InitSettings = function()
@@ -689,7 +700,12 @@ InitSettings = function()
     local function mediaChoice(m, key, name, kind) -- fonts and textures: values are LibSharedMedia names
         local function opts()
             local c = Settings.CreateControlTextContainer()
-            for _, media in ipairs(LSM:List(kind)) do c:Add(media, media) end
+            local stored, found = S(key, m), false
+            for _, media in ipairs(LSM:List(kind)) do
+                c:Add(media, media)
+                if media == stored then found = true end
+            end
+            if not found and type(stored) == "string" then c:Add(stored, stored) end -- never a blank dropdown
             return c:GetData()
         end
         return Settings.CreateDropdown(category, add(m, key, Settings.VarType.String, name), opts)
@@ -706,9 +722,8 @@ InitSettings = function()
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("General",
         "What the addon shows. These apply to every display mode."))
-    choice(nil, "mode", "Display", "Bar on player frame adds a fourth row under the player unit frame's bars, one strata "
-        .. "below it. It matches the unit frame, so Size and the lock/position settings do not apply to it. If the "
-        .. "player frame is hidden or replaced, the floating frame is used instead. Changes in combat wait until combat ends.")
+    choice(nil, "mode", "Display", "Bar: a mana bar with cast ticks. Placement (in Style) puts it on the player frame "
+        .. "or floating. Changes in combat wait until combat ends.")
     check(nil, "catOnly", "Show only in Cat Form", "Hide the display (every mode) outside Cat Form.")
     check(nil, "prdTicks", "Personal Resource Display: cast ticks", "A tick at every multiple of the Shifting Power cost "
         .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode. Uses the tick colour.")
@@ -808,8 +823,7 @@ f:SetScript("OnEvent", function(_, event)
         UpdateForm()
     elseif event == "PLAYER_REGEN_ENABLED" and pendingLayout then
         pendingLayout = false
-        Layout()
-        Repair() -- Lock and Reset position follow what is realised
+        Layout() -- also repairs the panel: Lock and Reset position follow what is realised
     end
     Rebuild()
 end)
@@ -856,6 +870,9 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
             :format(cmd, #all, table.concat(all, ", ", 1, math.min(3, #all))))
     elseif CLI_KEY[cmd] then
         local key = CLI_KEY[cmd]
+        if key == "tickColor" and arg == "frame" and S("placement", 3) == 2 then
+            return print("Shifting Power Count: the Frame tick colour needs Placement On player frame")
+        end
         local names = {}
         for i, e in ipairs(List(key, Where(key))) do
             if e[1] == arg then return Set(key, i) end
