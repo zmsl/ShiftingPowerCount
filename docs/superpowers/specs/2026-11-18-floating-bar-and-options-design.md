@@ -137,7 +137,7 @@ LibSharedMedia names (case-insensitive match).
 
 ### Library
 
-Vendor **LibStub** and **LibSharedMedia-3.0** under `Libs/`, loaded from the TOC before the addon file, with their
+Vendor **LibStub**, **CallbackHandler-1.0** (a LibSharedMedia dependency) and **LibSharedMedia-3.0** under `Libs/`, loaded from the TOC before the addon file, with their
 licence files and a README credit (project rule: reuse reputable libraries, vendor with licence and credit). Fetched
 with the `.pkgmeta` externals mechanism or committed; builder's call, but the CurseForge zip must contain them
 (`tools/check_package.sh` checks).
@@ -160,7 +160,7 @@ Marked as the designer's calls, not owner decisions; the owner reviews them with
 2. **The 14 cap is applied at render time, on the player-frame row only.** The stored `bar.fontSize` is never clamped,
    so a migrated 20 shows as 14 on the row (as today) and as 20 on the floating bar. Bar mode has no `scale` on
    purpose: the floating bar is sized by width and height. Migration maps the v1.0.0 font index to a name:
-   1 Friz Quadrata, 2 Arial Narrow, 3 Morpheus, 4 Skurri.
+   1 "Friz Quadrata TT" (LibSharedMedia's exact name), 2 "Arial Narrow", 3 "Morpheus", 4 "Skurri".
 3. **Missing LibSharedMedia names** (a media pack uninstalled): render with LibSharedMedia's default font/statusbar for
    that type, keep the stored name (so it comes back when the pack returns). The dropdown lists what is registered at
    panel build time; a stored name not in it shows as LibSharedMedia's default.
