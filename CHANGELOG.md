@@ -10,7 +10,7 @@
 - Cast ticks on the Personal Resource Display's mana row (Cat and Bear Form), on by default in every display mode;
   `/spcount prdticks on|off` or the panel checkbox.
 - Personal Resource Display ticks have their own section: shape Bar (width 1-8 px, default 2) or Pip (Blizzard's
-  Cooldown Manager marker), and a colour; `/spcount prdtickshape|prdtickcolor|prdtickwidth`.
+  Cooldown Manager marker), coloured from a colour picker; `/spcount prdtickshape|prdtickcolor RRGGBB|prdtickwidth`.
 - The style section is titled after the selected Display: Icon Style, Number Style or Bar Style.
 
 ## v1.0.0

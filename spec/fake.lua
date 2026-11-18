@@ -162,6 +162,7 @@ function F.install(o)
         end,
         CreateDropdown = function(_, st, fn, tip) return control(st, { kind = "dropdown", opts = fn(), optsFn = fn, tip = tip, init = init({}) }) end,
         CreateCheckbox = function(_, st) return control(st, { kind = "checkbox", init = init({}) }) end,
+        CreateColorSwatch = function(_, st, tip) return control(st, { kind = "swatch", tip = tip, init = init({}) }) end,
         OpenToCategory = function(id) reg.opened = id end,
     }
     _G.MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }

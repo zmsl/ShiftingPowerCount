@@ -14,7 +14,7 @@ local LSM = LibStub("LibSharedMedia-3.0")
 
 -- Options live in ShiftingPowerCountDB (defaults filled at login): General keys at the top level, each display mode's
 -- look in its own table (MODE_KEY[mode]). Choice options store an index into CHOICES; fonts are LibSharedMedia names.
-local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickShape = 1, prdTickColor = 1,
+local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickShape = 1, prdTickColor = "ffffffff",
     prdTickWidth = 2 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
@@ -34,9 +34,6 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
         { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
     prdTickShape = { { "bar", "Bar" }, { "pip", "Pip" } },
-    prdTickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
-        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "green", "Green", { 0.2, 1, 0.2, 0.9 } },
-        { "cyan", "Cyan", { 0.3, 0.9, 1, 0.9 } }, { "orange", "Orange", { 1, 0.5, 0.1, 0.9 } } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana", { 0, 0.55, 1 } }, { "energy", "Energy", BAR_ATLAS .. "Energy", { 1, 0.85, 0.1 } },
         { "rage", "Rage", BAR_ATLAS .. "Rage", { 1, 0.15, 0.15 } }, { "focus", "Focus", BAR_ATLAS .. "Focus", { 1, 0.5, 0.25 } },
         { "runic", "Runic power", BAR_ATLAS .. "RunicPower", { 0, 0.82, 1 } } }, -- [3] atlas (player frame), [4] RGB (floating)
@@ -49,8 +46,7 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     barTextPos = { { "center", "Center" }, { "left", "Left" }, { "right", "Right" }, { "above", "Above" }, { "below", "Below" } },
 }
 local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape",
-    prdtickcolor = "prdTickColor" }
+    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks",
     border = "border" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 },
@@ -58,6 +54,12 @@ local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, 
     prdtickwidth = { "prdTickWidth", 1, 8 } }
 local settingObjs, category = {}, nil
 local InitSettings
+
+-- A colour swatch value ("aarrggbb", as Blizzard's Settings colour swatch stores it) -> r, g, b in 0..1; nil if malformed.
+local function HexRGB(hex)
+    if type(hex) ~= "string" or not hex:match("^%x%x%x%x%x%x%x%x$") then return nil end
+    return tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255, tonumber(hex:sub(7, 8), 16) / 255
+end
 
 local function Opt(k)
     local db = ShiftingPowerCountDB
@@ -198,18 +200,18 @@ end
 local function TickLook(t, h, frameArt, c)
     if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- no player frame art to cut here: white
     if c == "prd" then
-        local rgb = (CHOICES.prdTickColor[Opt("prdTickColor")] or CHOICES.prdTickColor[1])[3]
+        local r, g, b = HexRGB(Opt("prdTickColor"))
+        if not r then r, g, b = 1, 1, 1 end
         if Opt("prdTickShape") == 2 then
             local pw = h * PIP_W / PIP_H
             t.core:SetAtlas(PRD_PIP)
             t.core:SetSize(pw, h)
             t.core:SetDesaturated(true)
-            t.core:SetVertexColor(rgb[1], rgb[2], rgb[3])
+            t.core:SetVertexColor(r, g, b)
             return pw
         end
-        c = rgb
         local tw = Opt("prdTickWidth")
-        t.core:SetColorTexture(c[1], c[2], c[3], c[4])
+        t.core:SetColorTexture(r, g, b, 1)
         t.core:SetTexCoord(0, 1, 0, 1)
         t.core:SetDesaturated(false)
         t.core:SetVertexColor(1, 1, 1)
@@ -757,7 +759,8 @@ InitSettings = function()
     check(nil, "prdTicks", "Cast ticks", "A tick at every multiple of the Shifting Power cost on the Personal "
         .. "Resource Display's mana row.")
     choice(nil, "prdTickShape", "Tick shape", "Bar: a plain line. Pip: Blizzard's Cooldown Manager marker.")
-    choice(nil, "prdTickColor", "Tick colour")
+    Settings.CreateColorSwatch(category, add(nil, "prdTickColor", Settings.VarType.String, "Tick colour"),
+        "Click to pick the colour of the ticks (bar or pip).")
     slider(nil, "prdTickWidth", "Tick width", 1, 8, 1, "Width of the bar shape, in pixels."):AddShownPredicate(function()
         return Opt("prdTickShape") == 1
     end)
@@ -829,6 +832,7 @@ f:SetScript("OnEvent", function(_, event)
             elseif C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("DarkMode") then db.barStyle = STYLE_MATCH end
         end
         db.dark, db.prdTickStyle = nil, nil -- prdTickStyle: an unreleased test build's key
+        if not HexRGB(db.prdTickColor) then db.prdTickColor = nil end -- a test build stored a preset index here
         Migrate(db)
         for k, v in pairs(DEFAULTS) do
             if db[k] == nil then db[k] = v end
@@ -874,7 +878,7 @@ local function Set(key, v)
 end
 
 local USAGE = "(style commands act on the current Display mode) /spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | texture <name> | width <50-400> | height <4-40> | bgalpha <0-1> | border on|off | outline | color | pos | alpha <0-1>"
-    .. " | barcolor | tickcolor | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | zero on|off | lock | unlock | reset"
+    .. " | barcolor | tickcolor | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | prdtickshape bar|pip | prdtickcolor RRGGBB | prdtickwidth <1-8> | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
@@ -892,6 +896,10 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         local v = tonumber(arg)
         if not v then return print(("Shifting Power Count: %s needs a number %s-%s"):format(cmd, lo, hi)) end
         Set(key, math.max(lo, math.min(hi, v)))
+    elseif cmd == "prdtickcolor" then
+        local hex = arg:match("^#?(%x%x%x%x%x%x)$")
+        if not hex then return print("Shifting Power Count: prdtickcolor takes a colour as RRGGBB, e.g. ff8000") end
+        Set("prdTickColor", "ff" .. hex:lower())
     elseif cmd == "font" or cmd == "texture" then
         local kind = cmd == "font" and "font" or "statusbar"
         local all = LSM:List(kind)
