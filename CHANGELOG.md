@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.1.1
 - Tick shape Frame: the experience bar's own divider, for the Personal Resource Display and the bar (player frame and
   floating). The bar's ticks now have Tick shape (Frame, Bar, Pip) and Tick width like the Personal Resource Display's;
   Bar and Pip show the colour picker. `/spcount tickshape|tickwidth`, `prdtickshape frame`.
