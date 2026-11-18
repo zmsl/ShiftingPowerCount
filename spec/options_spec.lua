@@ -475,3 +475,112 @@ describe("ticks on the Personal Resource Display mana row", function()
         assert.is_nil(w2.prdHost)
     end)
 end)
+
+describe("General and Style page", function()
+    local function shown(w, var) return w.settings.controls[var].init:IsShown() end
+    local function rows(w, m) -- the Style controls of mode m (variable names SPC_<MODE>_*) that are shown
+        local r = {}
+        for var, c in pairs(w.settings.controls) do
+            if var:find("^SPC_" .. m .. "_") and c.init:IsShown() then r[#r + 1] = var:sub(#m + 6) end
+        end
+        table.sort(r)
+        return r
+    end
+
+    it("has a General then a Style header, each with a tooltip", function()
+        local w = start({})
+        assert.same({ "General", "Style" }, { w.settings.headers[1].header, w.settings.headers[2].header })
+        assert.equal(2, #w.settings.headers)
+        for _, h in ipairs(w.settings.headers) do assert.is_true(#h.tooltip > 0) end
+    end)
+    it("shows General rows in every mode", function()
+        local w = start({})
+        for _, mode in ipairs({ "icon", "text", "bar" }) do
+            slash("mode " .. mode)
+            for _, var in ipairs({ "SPC_MODE", "SPC_CATONLY", "SPC_PRDTICKS" }) do assert.is_true(shown(w, var), var) end
+        end
+        slash("mode icon")
+        assert.is_true(shown(w, "SPC_LOCKED"))
+        assert.is_true(w.settings.buttons[1]:IsShown())
+    end)
+    it("shows only the selected mode's Style rows", function()
+        local w = start({})
+        assert.same({ "COLOR", "FONT", "FONTSIZE", "ICONALPHA", "OUTLINE", "SCALE", "TEXTPOS", "ZERORED" }, rows(w, "ICON"))
+        assert.same({}, rows(w, "TEXT")); assert.same({}, rows(w, "BAR"))
+        local before = w.settings.repairs
+        slash("mode text")
+        assert.same({ "COLOR", "FONT", "FONTSIZE", "OUTLINE", "SCALE", "ZERORED" }, rows(w, "TEXT"))
+        assert.same({}, rows(w, "ICON"))
+        assert.is_true(w.settings.repairs > before)
+        slash("mode bar")
+        assert.same({ "BARCOLOR", "BARSTYLE", "BARTEXT", "COLOR", "FONT", "FONTSIZE", "OUTLINE", "PLACEMENT", "TICKCOLOR", "TICKS", "ZERORED" },
+            rows(w, "BAR"))
+    end)
+    it("Number position belongs to Icon and number only", function()
+        local w = start({})
+        assert.is_table(w.settings.controls.SPC_ICON_TEXTPOS)
+        assert.is_nil(w.settings.controls.SPC_TEXT_TEXTPOS)
+        slash("mode text")
+        assert.is_nil(ShiftingPowerCountDB.text.textPos)
+    end)
+    it("Bar rows follow Placement; Frame tick colour only on the player frame", function()
+        local w = start({})
+        slash("mode bar")
+        assert.is_true(shown(w, "SPC_BAR_BARCOLOR") and shown(w, "SPC_BAR_BARSTYLE"))
+        local opts = w.settings.controls.SPC_BAR_TICKCOLOR.optsFn
+        assert.equal(4, #opts())
+        w.settings.settings.SPC_BAR_PLACEMENT:SetValue(2)
+        assert.is_false(shown(w, "SPC_BAR_BARCOLOR") or shown(w, "SPC_BAR_BARSTYLE"))
+        assert.equal(3, #opts())
+        assert.is_true(shown(w, "SPC_BAR_TICKS")) -- shared by both placements
+        w.settings.settings.SPC_BAR_PLACEMENT:SetValue(1)
+        assert.is_true(shown(w, "SPC_BAR_BARCOLOR"))
+    end)
+    it("style commands act on the current mode only", function()
+        local w = start({})
+        slash("mode text"); slash("fontsize 18")
+        assert.same({ 18, 20 }, { ShiftingPowerCountDB.text.fontSize, ShiftingPowerCountDB.icon.fontSize })
+        assert.equal(18, w.settings.settings.SPC_TEXT_FONTSIZE:GetValue())
+        assert.equal(20, w.settings.settings.SPC_ICON_FONTSIZE:GetValue())
+    end)
+    it("bar-only keys written while Display is icon or text land in the bar table", function()
+        local w = start({})
+        for _, mode in ipairs({ "icon", "text" }) do
+            slash("mode " .. mode)
+            slash("ticks off"); slash("bartext off"); slash("tickcolor black"); slash("barcolor rage"); slash("dark dark")
+            local bar = ShiftingPowerCountDB.bar
+            assert.same({ false, false, 2, 3, 3 }, { bar.ticks, bar.barText, bar.tickColor, bar.barColor, bar.barStyle }, mode)
+            w.settings.settings.SPC_BAR_TICKS:SetValue(true)
+            assert.is_true(bar.ticks)
+            assert.is_nil(ShiftingPowerCountDB[mode].ticks)
+        end
+    end)
+    it("hides Reset and Lock position when nothing floats", function()
+        local w = start({})
+        slash("mode bar")
+        assert.is_false(shown(w, "SPC_LOCKED") or w.settings.buttons[1]:IsShown())
+        w.settings.settings.SPC_BAR_PLACEMENT:SetValue(2)
+        assert.is_true(shown(w, "SPC_LOCKED") and w.settings.buttons[1]:IsShown())
+        slash("mode text")
+        assert.is_true(shown(w, "SPC_LOCKED"))
+    end)
+    it("lists LibSharedMedia fonts", function()
+        local w = start({})
+        local names = {}
+        for _, o in ipairs(w.settings.controls.SPC_ICON_FONT.opts) do names[o.value] = true end
+        assert.is_true(names["Arial Narrow"] and names["Friz Quadrata TT"])
+    end)
+    it("registers each setting with its true default, not the login value", function()
+        local w = start({})
+        slash("fontsize 33"); slash("mode text")
+        F.fire("PLAYER_LOGIN") -- re-registers from the saved table
+        assert.equal(20, w.settings.settings.SPC_ICON_FONTSIZE.default)
+        assert.equal(1, w.settings.settings.SPC_MODE.default)
+    end)
+    it("keeps the font failure line short", function()
+        local w = start({})
+        slash("font nope")
+        assert.is_true(#w.printed < 200)
+        assert.is_truthy(w.printed:find("Arial Narrow", 1, true))
+    end)
+end)

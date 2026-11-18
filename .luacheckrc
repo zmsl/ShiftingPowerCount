@@ -17,7 +17,7 @@ globals = { "ShiftingPowerCountDB", "SlashCmdList" }
 read_globals = {
     "LibStub", "issecretvalue", "CreateFrame", "UIParent", "InCombatLockdown", "hooksecurefunc",
     "GetShapeshiftFormID", "UnitPower", "UnitPowerMax", "UnitPowerPercent", "C_Spell", "C_SpellBook",
-    "C_CurveUtil", "C_AddOns", "Enum", "Settings", "CreateSettingsButtonInitializer",
+    "C_CurveUtil", "C_AddOns", "Enum", "Settings", "CreateSettingsButtonInitializer", "CreateSettingsListSectionHeaderInitializer", "SettingsInbound",
 }
 
 -- The busted specs install a fake client as globals.

@@ -106,7 +106,8 @@ function F.install(o)
     end
     _G.C_AddOns = { IsAddOnLoaded = function(n) return n == "DarkMode" and o.darkMode == true end }
     -- Fake Settings API: records registrations; an addon setting writes its table and calls the callback on SetValue.
-    local reg = { settings = {}, controls = {}, buttons = {} }
+    -- Settings and controls are keyed by variable name (SPC_ICON_SCALE); a bare DB key aliases the first one registered.
+    local reg = { settings = {}, controls = {}, buttons = {}, headers = {}, repairs = 0 }
     w.settings = reg
     local setting = {}
     setting.__index = setting
@@ -114,17 +115,35 @@ function F.install(o)
     function setting:GetValue() return self.tbl[self.key] end
     function setting:SetValue(v) self.tbl[self.key] = v; if self.cb then self.cb(self, v) end end
     local category = { GetID = function() return 42 end }
+    local initializer = {}
+    initializer.__index = initializer
+    function initializer:AddShownPredicate(fn) self.preds[#self.preds + 1] = fn end
+    function initializer:IsShown() -- every predicate true (Blizzard: the row shows only then)
+        for _, fn in ipairs(self.preds) do if not fn() then return false end end
+        return true
+    end
+    local function init(t) t.preds = {}; return setmetatable(t, initializer) end
+    local function control(st, c)
+        reg.controls[st.var] = c
+        if reg.controls[st.key] == nil then reg.controls[st.key] = c end
+        return c.init
+    end
+    _G.SettingsInbound = { RepairDisplay = function() reg.repairs = reg.repairs + 1 end }
+    _G.CreateSettingsListSectionHeaderInitializer = function(name, tip) return init({ header = name, tooltip = tip }) end
     _G.Settings = {
         VarType = { Number = "Number", Boolean = "Boolean", String = "String" }, Default = { True = true, False = false },
         RegisterVerticalLayoutCategory = function(name)
             category.name = name
-            return category, { AddInitializer = function(_, i) reg.buttons[#reg.buttons + 1] = i end }
+            return category, { AddInitializer = function(_, i)
+                if i.header then reg.headers[#reg.headers + 1] = i else reg.buttons[#reg.buttons + 1] = i end
+            end }
         end,
         RegisterAddOnCategory = function(c) reg.category = c end,
         RegisterAddOnSetting = function(_, var, key, tbl, vtype, name, default)
             if tbl[key] == nil then tbl[key] = default end
-            local st = setmetatable({ var = var, key = key, tbl = tbl, name = name, vtype = vtype }, setting)
-            reg.settings[key] = st
+            local st = setmetatable({ var = var, key = key, tbl = tbl, name = name, vtype = vtype, default = default }, setting)
+            reg.settings[var] = st
+            if reg.settings[key] == nil then reg.settings[key] = st end
             return st
         end,
         CreateSliderOptions = function(lo, hi, step) return { lo = lo, hi = hi, step = step, SetLabelFormatter = function() end } end,
@@ -135,16 +154,15 @@ function F.install(o)
             return c
         end,
         CreateSlider = function(_, st, o)
-            local init = { InitFrame = function() end, Resetter = function() end } -- Blizzard's mixin defaults, overridden per instance
-            reg.controls[st.key] = { kind = "slider", opts = o, init = init }
-            return init
+            -- Blizzard's mixin defaults for InitFrame/Resetter, overridden per instance
+            return control(st, { kind = "slider", opts = o, init = init({ InitFrame = function() end, Resetter = function() end }) })
         end,
-        CreateDropdown = function(_, st, fn) reg.controls[st.key] = { kind = "dropdown", opts = fn() } end,
-        CreateCheckbox = function(_, st) reg.controls[st.key] = { kind = "checkbox" } end,
+        CreateDropdown = function(_, st, fn) return control(st, { kind = "dropdown", opts = fn(), optsFn = fn, init = init({}) }) end,
+        CreateCheckbox = function(_, st) return control(st, { kind = "checkbox", init = init({}) }) end,
         OpenToCategory = function(id) reg.opened = id end,
     }
     _G.MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
-    _G.CreateSettingsButtonInitializer = function(name, text, click) return { name = name, text = text, click = click } end
+    _G.CreateSettingsButtonInitializer = function(name, text, click) return init({ name = name, text = text, click = click }) end
     _G.Enum = { LuaCurveType = { Step = "Step" } }
     _G.C_CurveUtil = { CreateCurve = function()
         local c = { pts = {} }

@@ -38,10 +38,11 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     color = { { "white", "White", { 1, 1, 1 } }, { "yellow", "Yellow", { 1, 0.82, 0 } }, { "green", "Green", { 0.2, 1, 0.2 } },
         { "cyan", "Cyan", { 0.3, 0.9, 1 } }, { "orange", "Orange", { 1, 0.5, 0.1 } } },
     barStyle = { { "normal", "Normal" }, { "match", "Match player frame" }, { "dark", "Dark" } },
+    placement = { { "player", "On player frame" }, { "floating", "Floating" } },
     textPos = { { "center", "Center" }, { "below", "Below the icon" }, { "above", "Above the icon" } },
 }
 local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor", dark = "barStyle" }
+    tickcolor = "tickColor", dark = "barStyle", placement = "placement" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 } }
 local settingObjs, category = {}, nil
@@ -70,23 +71,16 @@ local function SChoice(k, m) return CHOICES[k][S(k, m)] or CHOICES[k][1] end
 local function Scale() return S("scale") or S("scale", 1) end
 local function FontPath() return LSM:Fetch("font", S("font")) end
 
--- Where the panel and the CLI read and write a key: General at the top level, else the current mode's table if it has
--- the key, else bar's (the bar-only keys), else icon's. A proxy, so the registered settings follow a mode change.
+-- Which mode's table the CLI writes style key k into: the current mode's if it has the key, else bar's (the bar-only
+-- keys), else icon's; nil for a General key (top level).
 local function Where(k)
-    if DEFAULTS[k] ~= nil then return ShiftingPowerCountDB, DEFAULTS end
+    if DEFAULTS[k] ~= nil then return nil end
     local m = CurMode()
     if MODE_DEFAULTS[m][k] == nil then m = MODE_DEFAULTS[3][k] ~= nil and 3 or 1 end
-    return ShiftingPowerCountDB[MODE_KEY[m]], MODE_DEFAULTS[m]
+    return m
 end
-local PANEL = setmetatable({}, {
-    __index = function(_, k)
-        local t, d = Where(k)
-        local v = t[k]
-        if v == nil then return d[k] end
-        return v
-    end,
-    __newindex = function(_, k, v) (Where(k))[k] = v end,
-})
+-- Settings variable name: SPC_<KEY> for General, SPC_<MODEKEY>_<KEY> per mode.
+local function Var(k, m) return "SPC_" .. (m and MODE_KEY[m]:upper() .. "_" or "") .. k:upper() end
 
 -- v1.0.0 flat keys -> per-mode tables, once (schema absent). Pure: the table in, the table out.
 local function Migrate(db)
@@ -545,72 +539,112 @@ local function AttachBox(init, st, key, lo, hi, step)
     end
 end
 
--- Options > AddOns panel (Settings API, verified on Forever). RegisterAddOnSetting writes into ShiftingPowerCountDB;
--- the value callback applies the change live.
+-- Options > AddOns panel (Settings API, verified on Forever). Each setting is registered against the table that holds
+-- it (General: the top level; Style: its mode's table), so the panel and the CLI write the same field; the value
+-- callback applies the change live. Style rows of every mode exist; shown predicates keep only the selected mode's.
+local function Repair() -- the open panel re-evaluates the shown predicates
+    if SettingsInbound and SettingsInbound.RepairDisplay then SettingsInbound.RepairDisplay() end
+end
+local function ModeShown(m) return function() return CurMode() == m end end
+local function PlacementShown(p) return function() return S("placement", 3) == p end end
+local function Floats() return not (CurMode() == 3 and S("placement", 3) == 1) end -- something to move or lock
+
 InitSettings = function()
     if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end -- no panel: CLI only
     local layout
     category, layout = Settings.RegisterVerticalLayoutCategory("Shifting Power Count")
-    local function add(key, vtype, name)
-        local st = Settings.RegisterAddOnSetting(category, "SPC_" .. key:upper(), key, PANEL, vtype, name, PANEL[key])
+    -- m: the mode whose table holds the setting (nil: General). Each helper returns the row's initializer.
+    local function add(m, key, vtype, name)
+        local db = ShiftingPowerCountDB
+        local var = Var(key, m)
+        local st = Settings.RegisterAddOnSetting(category, var, key, m and db[MODE_KEY[m]] or db, vtype, name,
+            (m and MODE_DEFAULTS[m] or DEFAULTS)[key])
         st:SetValueChangedCallback(function(_, v)
-            PANEL[key] = v
             Apply()
-            if boxes[key] and type(v) == "number" then boxes[key]:SetText(Fmt(v)) end -- slider/CLI -> box
+            if key == "mode" or key == "placement" then Repair() end
+            if boxes[var] and type(v) == "number" then boxes[var]:SetText(Fmt(v)) end -- slider/CLI -> box
         end)
-        settingObjs[key] = st
+        settingObjs[var] = st
         return st
     end
-    local function choice(key, name, tip)
+    local function check(m, key, name, tip)
+        return Settings.CreateCheckbox(category, add(m, key, Settings.VarType.Boolean, name), tip)
+    end
+    local function choice(m, key, name, tip, list) -- list: optional function giving the CHOICES entries to offer
         local function opts()
             local c = Settings.CreateControlTextContainer()
-            for i, e in ipairs(CHOICES[key]) do c:Add(i, e[2]) end
+            for i, e in ipairs(list and list() or CHOICES[key]) do c:Add(i, e[2]) end
             return c:GetData()
         end
-        Settings.CreateDropdown(category, add(key, Settings.VarType.Number, name), opts, tip)
+        return Settings.CreateDropdown(category, add(m, key, Settings.VarType.Number, name), opts, tip)
     end
-    local function fontChoice(key, name) -- values are LibSharedMedia names
+    local function fontChoice(m, key, name) -- values are LibSharedMedia names
         local function opts()
             local c = Settings.CreateControlTextContainer()
             for _, font in ipairs(LSM:List("font")) do c:Add(font, font) end
             return c:GetData()
         end
-        Settings.CreateDropdown(category, add(key, Settings.VarType.String, name), opts)
+        return Settings.CreateDropdown(category, add(m, key, Settings.VarType.String, name), opts)
     end
-    local function slider(key, name, lo, hi, step, tip)
-        local st = add(key, Settings.VarType.Number, name)
+    local function slider(m, key, name, lo, hi, step, tip)
+        local st = add(m, key, Settings.VarType.Number, name)
         -- no right-hand value label: the number box takes its place
-        AttachBox(Settings.CreateSlider(category, st, Settings.CreateSliderOptions(lo, hi, step), tip), st, key, lo, hi, step)
+        local init = Settings.CreateSlider(category, st, Settings.CreateSliderOptions(lo, hi, step), tip)
+        AttachBox(init, st, Var(key, m), lo, hi, step)
+        return init
     end
-    Settings.CreateCheckbox(category, add("catOnly", Settings.VarType.Boolean, "Show only in Cat Form"),
-        "Hide the display (every mode) outside Cat Form.")
-    choice("mode", "Display", "Bar on player frame adds a fourth row under the player unit frame's bars, one strata "
+    -- Tick colour: the Frame choice cuts the player frame's border art, so only On player frame offers it.
+    local function tickChoices() return S("placement", 3) == 1 and CHOICES.tickColor or { unpack(CHOICES.tickColor, 1, 3) } end
+
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("General",
+        "What the addon shows. These apply to every display mode."))
+    choice(nil, "mode", "Display", "Bar on player frame adds a fourth row under the player unit frame's bars, one strata "
         .. "below it. It matches the unit frame, so Size and the lock/position settings do not apply to it. If the "
         .. "player frame is hidden or replaced, the floating frame is used instead. Changes in combat wait until combat ends.")
-    slider("scale", "Size", 0.5, 3, 0.1, "Scales the floating frame (icon and number together). Not used by the bar.")
-    slider("iconAlpha", "Icon opacity", 0, 1, 0.05)
-    Settings.CreateCheckbox(category, add("locked", Settings.VarType.Boolean, "Lock position"))
-    layout:AddInitializer(CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
-        "Put the frame back at its default spot", true))
-    slider("fontSize", "Number size", 8, 72, 1)
-    fontChoice("font", "Number font")
-    choice("outline", "Number outline")
-    choice("color", "Number colour")
-    choice("textPos", "Number position")
-    Settings.CreateCheckbox(category, add("zeroRed", Settings.VarType.Boolean, "Show 0 in red"))
-    choice("barColor", "Bar colour", "Fill of the bar on the player frame.")
-    choice("barStyle", "Bar style", "Normal: the plain frame art. Match player frame: the new row's frame art and well "
-        .. "take the colour the player frame has (for example from the DarkMode addon). Dark: a fixed near-black well, "
-        .. "a dimmer fill and a darker copy of the frame art.")
-    Settings.CreateCheckbox(category, add("ticks", Settings.VarType.Boolean, "Bar: show cast ticks"),
-        "A tick at every multiple of the Shifting Power cost, so each segment is one cast.")
-    choice("tickColor", "Bar: tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. Frame: a slice of the player frame's "
-        .. "own border art, greyed and tinted like it (for example by DarkMode), no edges; white on the Personal Resource Display.")
-    Settings.CreateCheckbox(category, add("barText", Settings.VarType.Boolean, "Bar: show count"),
-        "Show the number of casts on the bar.")
-    Settings.CreateCheckbox(category, add("prdTicks", Settings.VarType.Boolean, "Personal Resource Display: cast ticks"),
-        "A tick at every multiple of the Shifting Power cost on the Personal Resource Display's mana row (Cat and Bear Form), "
-        .. "in every display mode. Uses the tick colour.")
+    check(nil, "catOnly", "Show only in Cat Form", "Hide the display (every mode) outside Cat Form.")
+    check(nil, "prdTicks", "Personal Resource Display: cast ticks", "A tick at every multiple of the Shifting Power cost "
+        .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode. Uses the tick colour.")
+    check(nil, "locked", "Lock position"):AddShownPredicate(Floats)
+    local reset = CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
+        "Put the frame back at its default spot", true)
+    reset:AddShownPredicate(Floats)
+    layout:AddInitializer(reset)
+
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Style",
+        "How the selected display looks. Switch Display above to style another mode."))
+    for m = 1, 3 do
+        local function row(init, p) -- shown only for mode m (and bar placement p)
+            init:AddShownPredicate(ModeShown(m))
+            if p then init:AddShownPredicate(PlacementShown(p)) end
+        end
+        if m == 3 then
+            row(choice(m, "placement", "Placement", "On player frame: a fourth row under the player unit frame's bars. "
+                .. "Floating: a separate bar you can move."))
+        end
+        if m ~= 3 then
+            row(slider(m, "scale", "Size", 0.5, 3, 0.1, "Scales the floating frame (icon and number together)."))
+        end
+        if m == 1 then row(slider(m, "iconAlpha", "Icon opacity", 0, 1, 0.05)) end
+        if m == 3 then
+            row(check(m, "ticks", "Show cast ticks", "A tick at every multiple of the Shifting Power cost, so each segment is one cast."))
+            row(choice(m, "tickColor", "Tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. "
+                .. "Frame (On player frame only): a slice of the player frame's own border art, greyed and tinted like it "
+                .. "(for example by DarkMode), no edges; white on the Personal Resource Display.", tickChoices))
+            row(check(m, "barText", "Show count", "Show the number of casts on the bar."))
+        end
+        row(slider(m, "fontSize", "Number size", 8, 72, 1))
+        row(fontChoice(m, "font", "Number font"))
+        row(choice(m, "outline", "Number outline"))
+        row(choice(m, "color", "Number colour"))
+        if m == 1 then row(choice(m, "textPos", "Number position")) end
+        row(check(m, "zeroRed", "Show 0 in red"))
+        if m == 3 then
+            row(choice(m, "barColor", "Bar colour", "Fill of the bar on the player frame."), 1)
+            row(choice(m, "barStyle", "Bar style", "Normal: the plain frame art. Match player frame: the new row's frame art "
+                .. "and well take the colour the player frame has (for example from the DarkMode addon). Dark: a fixed "
+                .. "near-black well, a dimmer fill and a darker copy of the frame art."), 1)
+        end
+    end
     Settings.RegisterAddOnCategory(category)
 end
 
@@ -665,13 +699,17 @@ f:SetScript("OnEvent", function(_, event)
 end)
 
 local function Set(key, v)
-    if settingObjs[key] then settingObjs[key]:SetValue(v) end -- keeps an open panel in step
-    PANEL[key] = v
+    local m = Where(key)
+    local st = settingObjs[Var(key, m)]
+    if st then return st:SetValue(v) end -- the panel's setting writes the field and applies (keeps an open panel in step)
+    local db = ShiftingPowerCountDB
+    local t = m and db[MODE_KEY[m]] or db
+    t[key] = v
     Apply()
 end
 
-local USAGE = "/spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | outline | color | pos | alpha <0-1>"
-    .. " | barcolor | tickcolor | dark normal|match|dark | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | zero on|off | lock | unlock | reset"
+local USAGE = "(style commands act on the current Display mode) /spcount size <0.5-3> | mode icon|text|bar | fontsize <8-72> | font <name> | outline | color | pos | alpha <0-1>"
+    .. " | barcolor | tickcolor | dark normal|match|dark | placement player|floating | catonly on|off | ticks on|off | bartext on|off | prdticks on|off | zero on|off | lock | unlock | reset"
 
 SLASH_SHIFTINGPOWERCOUNT1 = "/spcount"
 SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
@@ -694,7 +732,9 @@ SlashCmdList.SHIFTINGPOWERCOUNT = function(msg)
         for _, name in ipairs(LSM:List("font")) do
             if name:lower() == want then return Set("font", name) end
         end
-        print("Shifting Power Count: font is one of " .. table.concat(LSM:List("font"), ", "))
+        local all = LSM:List("font")
+        print(("Shifting Power Count: font is a LibSharedMedia name, %d installed (%s ...); the panel lists them all")
+            :format(#all, table.concat(all, ", ", 1, math.min(3, #all))))
     elseif CLI_KEY[cmd] then
         local key = CLI_KEY[cmd]
         local names = {}
