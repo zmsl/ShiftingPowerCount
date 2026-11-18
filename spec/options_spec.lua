@@ -457,15 +457,16 @@ describe("ticks on the Personal Resource Display mana row", function()
         assert.same({ 20, 40, 60, 80 }, xs(w.prdHost))
         assert.same({ 2, 6 }, cores(w.prdHost)[1].size)
     end)
-    it("prdticks off hides them, the panel has the checkbox; Frame colour falls back to white there", function()
+    it("prdticks off hides them, the panel has the checkbox; the bar's tick colour does not reach the PRD", function()
         local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
         slash("prdticks off")
         assert.same({}, xs(w.prdHost))
         slash("prdticks on")
         assert.equal(4, #xs(w.prdHost))
         assert.is_table(w.settings.controls.prdTicks)
-        slash("tickcolor frame")
-        assert.same({ 1, 1, 1, 0.9 }, cores(w.prdHost)[1].color4)
+        slash("tickcolor yellow")
+        assert.equal(6704514, cores(w.prdHost)[1].texture) -- still the PRD tick style's Border slice
+        assert.is_nil(rawget(cores(w.prdHost)[1], "color4"))
     end)
     it("hidden outside Cat Form with the rest of the display; no PRD, no error", function()
         local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
@@ -600,5 +601,55 @@ describe("General and Style page", function()
         assert.is_true(has("SPC_ICON_FONT", "Gone Font"))
         assert.is_true(has("SPC_BAR_TEXTURE", "Gone Tex"))
         assert.is_true(has("SPC_ICON_FONT", "Arial Narrow")) -- the listed ones stay
+    end)
+end)
+
+describe("Personal Resource Display tick style", function()
+    local function shown(host)
+        local r = {}
+        for _, t in ipairs(rawget(host, "textures") or {}) do
+            if rawget(t, "size") and not rawget(t, "hidden") and (rawget(t, "texture") or rawget(t, "atlas") or rawget(t, "color4")) then
+                r[#r + 1] = t
+            end
+        end
+        return r
+    end
+    local function near(a, b) return math.abs(a - b) < 1e-9 end
+
+    it("defaults to Border: a 2px slice of the PRD bar's border art at the row's height, no edges", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        assert.equal(4, ShiftingPowerCountDB.prdTickStyle)
+        local t = shown(w.prdHost)
+        assert.equal(4, #t) -- cores only: the 1px edges stay hidden
+        assert.equal(6704514, t[1].texture)
+        assert.same({ 2, 10 }, t[1].size)
+        local c = t[1].texcoord -- atlas columns 0..2 of 132, rows 3..12 of 19
+        for i, want in ipairs({ 0.1, 0.102, 0.03, 0.12 }) do assert.is_true(near(c[i], want), "texcoord " .. i) end
+    end)
+    it("Pip uses Blizzard's Cooldown Manager pip at the row's height", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        slash("prdtickstyle pip")
+        local t = shown(w.prdHost)
+        assert.equal(4, #t)
+        assert.equal("UI-HUD-CoolDownManager-Bar-Pip", t[1].atlas)
+        assert.is_true(near(t[1].size[1], 100 / 23) and t[1].size[2] == 10)
+    end)
+    it("colour styles keep 2px cores with edges; the bar's tick colour no longer drives the PRD", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        slash("prdtickstyle yellow")
+        slash("mode bar"); slash("tickcolor black")
+        local t = shown(w.prdHost)
+        assert.equal(12, #t) -- 4 cores + 8 edges
+        local cores = {}
+        for _, x in ipairs(t) do if x.size[1] == 2 then cores[#cores + 1] = x end end
+        assert.same({ 1, 0.9, 0.2, 0.9 }, cores[1].color4)
+        assert.is_table(w.settings.controls.SPC_PRDTICKSTYLE)
+    end)
+    it("switching back from Pip to Border clears the atlas look", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        slash("prdtickstyle pip"); slash("prdtickstyle border")
+        local t = shown(w.prdHost)
+        assert.equal(6704514, t[1].texture)
+        assert.same({ 2, 10 }, t[1].size)
     end)
 end)

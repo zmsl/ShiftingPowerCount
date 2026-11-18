@@ -182,6 +182,12 @@ function F.install(o)
         if not curve then return F.SECRET end -- the real client: a plain percent read is secret even out of combat
         return curve:Eval(w.max == 0 and 0 or w.mana / w.max) -- input 0..1 (Blizzard CurveConstants.ScaleTo100)
     end
+    -- Atlas lookup for the PRD tick art: the bar border on a 0.001-per-pixel-wide, 0.01-per-pixel-tall sheet.
+    _G.C_Texture = { GetAtlasInfo = function(name)
+        if name == "UI-HUD-CoolDownManager-Bar-BG" then
+            return { file = 6704514, leftTexCoord = 0.1, rightTexCoord = 0.232, topTexCoord = 0, bottomTexCoord = 0.19 }
+        end
+    end }
     _G.C_Spell = { GetSpellPowerCost = function() return { { type = 0, cost = w.cost } } end, GetSpellTexture = function() return 1 end }
     _G.C_SpellBook = { IsSpellKnown = function() return w.known end }
     _G.InCombatLockdown = function() return w.combat end

@@ -14,7 +14,7 @@ local LSM = LibStub("LibSharedMedia-3.0")
 
 -- Options live in ShiftingPowerCountDB (defaults filled at login): General keys at the top level, each display mode's
 -- look in its own table (MODE_KEY[mode]). Choice options store an index into CHOICES; fonts are LibSharedMedia names.
-local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true } -- General
+local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickStyle = 4 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
 local MODE_DEFAULTS = {
@@ -32,6 +32,8 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar" } },
     tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
         { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
+    prdTickStyle = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
+        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "border", "Border", "border" }, { "pip", "Pip", "pip" } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana", { 0, 0.55, 1 } }, { "energy", "Energy", BAR_ATLAS .. "Energy", { 1, 0.85, 0.1 } },
         { "rage", "Rage", BAR_ATLAS .. "Rage", { 1, 0.15, 0.15 } }, { "focus", "Focus", BAR_ATLAS .. "Focus", { 1, 0.5, 0.25 } },
         { "runic", "Runic power", BAR_ATLAS .. "RunicPower", { 0, 0.82, 1 } } }, -- [3] atlas (player frame), [4] RGB (floating)
@@ -44,7 +46,7 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     barTextPos = { { "center", "Center" }, { "left", "Left" }, { "right", "Right" }, { "above", "Above" }, { "below", "Below" } },
 }
 local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor", dark = "barStyle", placement = "placement" }
+    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickstyle = "prdTickStyle" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks",
     border = "border" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 },
@@ -146,6 +148,14 @@ local bar, ticks = nil, {}
 -- Personal Resource Display: on Forever its AlternatePowerBar is the mana row whenever the main bar is not mana (Cat and
 -- Bear Form; Blizzard_PersonalResourceDisplay Camelot override). Our ticks live on our own child frame of that row.
 local prdBar, prdHost, prdTicks = nil, nil, {}
+-- PRD tick art (Blizzard_PersonalResourceDisplay.xml: the bars use the Cooldown Manager atlases). Border: a slice of the
+-- bar's frame art. Blizzard anchors that art (-2,+3)/(+6,-7) around the bar, so on its 132x19 atlas a 124x9 bar sits at
+-- columns 2..126, rows 3..12; the slice is the left bevel (columns 0..2) over the bar's rows. Coordinates come from
+-- C_Texture.GetAtlasInfo, so no sheet size is assumed. Not yet seen in game: PRD_SLICE_X0/X1 are the numbers to nudge.
+local PRD_BG, PRD_PIP = "UI-HUD-CoolDownManager-Bar-BG", "UI-HUD-CoolDownManager-Bar-Pip"
+local PRD_ATLAS_W, PRD_ATLAS_H = 132, 19
+local PRD_SLICE_X0, PRD_SLICE_X1, PRD_SLICE_Y0, PRD_SLICE_Y1 = 0, 2, 3, 12
+local PIP_W, PIP_H = 10, 23 -- the pip atlas's aspect (UI-HUD-CoolDownManager-Bar-Pip)
 local barAtlas
 local overlay, barArt, barBg -- overlay: label host above the bar (outside the masked fill); art/bg: our own textures
 local barOn = false -- the display actually realised (mode asked for AND PlayerFrame usable)
@@ -183,9 +193,32 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
-local function TickLook(t, h, frameArt) -- colour ticks, or the frame-art slice mirroring PlayerFrame's desaturation and colour
-    local c = SChoice("tickColor", 3)[3]
-    if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- the PRD has no border art to cut: white
+-- c: a choice value: an RGBA colour, "frame" (player frame border slice), "border" (PRD border slice) or "pip".
+local function TickLook(t, h, frameArt, c)
+    if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- no player frame art to cut here: white
+    if c == "border" then
+        local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(PRD_BG)
+        if info then
+            local l, r, top, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
+            t.core:SetTexture(info.file)
+            t.core:SetTexCoord(l + (r - l) * PRD_SLICE_X0 / PRD_ATLAS_W, l + (r - l) * PRD_SLICE_X1 / PRD_ATLAS_W,
+                top + (b - top) * PRD_SLICE_Y0 / PRD_ATLAS_H, top + (b - top) * PRD_SLICE_Y1 / PRD_ATLAS_H)
+            t.core:SetSize(PRD_SLICE_X1 - PRD_SLICE_X0, h)
+            t.core:SetDesaturated(false)
+            t.core:SetVertexColor(1, 1, 1)
+            t.l:Hide(); t.r:Hide()
+            return false
+        end
+        c = CHOICES.tickColor[1][3] -- atlas unknown on this client: white
+    end
+    if c == "pip" then
+        t.core:SetAtlas(PRD_PIP)
+        t.core:SetSize(h * PIP_W / PIP_H, h)
+        t.core:SetDesaturated(false)
+        t.core:SetVertexColor(1, 1, 1)
+        t.l:Hide(); t.r:Hide()
+        return false
+    end
     if c == "frame" then
         local x0 = ATLAS_L + TICK_FRAME_X
         local y0 = ATLAS_T + TICK_FRAME_Y
@@ -211,7 +244,7 @@ local function TickLook(t, h, frameArt) -- colour ticks, or the frame-art slice 
 end
 
 -- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
-local function PlaceTicks(host, list, show, w, h, frameArt)
+local function PlaceTicks(host, list, show, w, h, frameArt, look)
     for i = 1, MAX_LABELS do
         local x = show and (i * cost / maxMana * w) -- only divides when show (maxMana > 0)
         local t = list[i]
@@ -221,7 +254,7 @@ local function PlaceTicks(host, list, show, w, h, frameArt)
                     r = host:CreateTexture(nil, "OVERLAY", nil, 1) }
                 list[i] = t
             end
-            local edges = TickLook(t, h, frameArt)
+            local edges = TickLook(t, h, frameArt, look)
             t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - 1, 0)
             t.l:ClearAllPoints(); t.l:SetPoint("RIGHT", t.core, "LEFT", 0, 0)
             t.r:ClearAllPoints(); t.r:SetPoint("LEFT", t.core, "RIGHT", 0, 0)
@@ -235,12 +268,14 @@ end
 
 local function LayoutTicks()
     local ok = cost > 0 and maxMana > 0
-    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, true) end
-    if floatBar then PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), false) end
+    local look = SChoice("tickColor", 3)[3]
+    if bar then PlaceTicks(bar, ticks, S("ticks", 3) and ok, BAR_W, BAR_H, true, look) end
+    if floatBar then PlaceTicks(floatBar, floatTicks, S("ticks", 3) and ok, S("width", 3), S("height", 3), false, look) end
     if prdHost then
         local w, h = prdBar:GetWidth(), prdBar:GetHeight()
         if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
-        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false)
+        local style = CHOICES.prdTickStyle[Opt("prdTickStyle")] or CHOICES.prdTickStyle[DEFAULTS.prdTickStyle]
+        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false, style[3])
     end
 end
 
@@ -726,7 +761,10 @@ InitSettings = function()
         .. "or floating. Changes in combat wait until combat ends.")
     check(nil, "catOnly", "Show only in Cat Form", "Hide the display (every mode) outside Cat Form.")
     check(nil, "prdTicks", "Personal Resource Display: cast ticks", "A tick at every multiple of the Shifting Power cost "
-        .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode. Uses the tick colour.")
+        .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode.")
+    choice(nil, "prdTickStyle", "Personal Resource Display: tick style", "Border: a slice of the Personal Resource "
+        .. "Display bar's own frame art. Pip: Blizzard's Cooldown Manager marker. White, black and yellow ticks have a "
+        .. "1px edge on both sides.")
     check(nil, "locked", "Lock position"):AddShownPredicate(Floats)
     local reset = CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
         "Put the frame back at its default spot", true)
@@ -752,7 +790,7 @@ InitSettings = function()
             row(check(m, "ticks", "Show cast ticks", "A tick at every multiple of the Shifting Power cost, so each segment is one cast."))
             row(choice(m, "tickColor", "Tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. "
                 .. "Frame (On player frame only): a slice of the player frame's own border art, greyed and tinted like it "
-                .. "(for example by DarkMode), no edges; white on the Personal Resource Display.", tickChoices))
+                .. "(for example by DarkMode), no edges.", tickChoices))
             row(check(m, "barText", "Show count", "Show the number of casts on the bar."))
         end
         row(slider(m, "fontSize", "Number size", 8, 72, 1))

@@ -9,6 +9,8 @@
   says which mode it changed.
 - Cast ticks on the Personal Resource Display's mana row (Cat and Bear Form), on by default in every display mode;
   `/spcount prdticks on|off` or the panel checkbox.
+- Personal Resource Display tick style: Border (default; a slice of that bar's own frame art), Pip, or a plain
+  colour; `/spcount prdtickstyle`.
 
 ## v1.0.0
 - First CurseForge release: live count of the Shifting Powers your mana pays for, in combat with secret mana; icon,
