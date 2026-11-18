@@ -14,7 +14,8 @@ local LSM = LibStub("LibSharedMedia-3.0")
 
 -- Options live in ShiftingPowerCountDB (defaults filled at login): General keys at the top level, each display mode's
 -- look in its own table (MODE_KEY[mode]). Choice options store an index into CHOICES; fonts are LibSharedMedia names.
-local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickStyle = 4 } -- General
+local DEFAULTS = { mode = 1, locked = false, catOnly = true, prdTicks = true, prdTickShape = 1, prdTickColor = 1,
+    prdTickWidth = 2 } -- General
 local MODE_KEY = { "icon", "text", "bar" }
 local FONT = "Friz Quadrata TT"
 local MODE_DEFAULTS = {
@@ -32,8 +33,10 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     mode = { { "icon", "Icon and number" }, { "text", "Number only" }, { "bar", "Bar" } },
     tickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
         { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "frame", "Frame", "frame" } },
-    prdTickStyle = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
-        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "border", "Border", "border" }, { "pip", "Pip", "pip" } },
+    prdTickShape = { { "bar", "Bar" }, { "pip", "Pip" } },
+    prdTickColor = { { "white", "White", { 1, 1, 1, 0.9 } }, { "black", "Black", { 0, 0, 0, 0.9 } },
+        { "yellow", "Yellow", { 1, 0.9, 0.2, 0.9 } }, { "green", "Green", { 0.2, 1, 0.2, 0.9 } },
+        { "cyan", "Cyan", { 0.3, 0.9, 1, 0.9 } }, { "orange", "Orange", { 1, 0.5, 0.1, 0.9 } } },
     barColor = { { "mana", "Mana", BAR_ATLAS .. "Mana", { 0, 0.55, 1 } }, { "energy", "Energy", BAR_ATLAS .. "Energy", { 1, 0.85, 0.1 } },
         { "rage", "Rage", BAR_ATLAS .. "Rage", { 1, 0.15, 0.15 } }, { "focus", "Focus", BAR_ATLAS .. "Focus", { 1, 0.5, 0.25 } },
         { "runic", "Runic power", BAR_ATLAS .. "RunicPower", { 0, 0.82, 1 } } }, -- [3] atlas (player frame), [4] RGB (floating)
@@ -46,11 +49,13 @@ local CHOICES = { -- DB key -> { CLI name, panel label, value (font path / outli
     barTextPos = { { "center", "Center" }, { "left", "Left" }, { "right", "Right" }, { "above", "Above" }, { "below", "Below" } },
 }
 local CLI_KEY = { mode = "mode", outline = "outline", color = "color", pos = "textPos", barcolor = "barColor",
-    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickstyle = "prdTickStyle" }
+    tickcolor = "tickColor", dark = "barStyle", placement = "placement", prdtickshape = "prdTickShape",
+    prdtickcolor = "prdTickColor" }
 local CLI_BOOL = { zero = "zeroRed", ticks = "ticks", bartext = "barText", catonly = "catOnly", prdticks = "prdTicks",
     border = "border" }
 local CLI_NUM = { size = { "scale", 0.5, 3 }, fontsize = { "fontSize", 8, 72 }, alpha = { "iconAlpha", 0, 1 },
-    width = { "width", 50, 400 }, height = { "height", 4, 40 }, bgalpha = { "bgAlpha", 0, 1 } }
+    width = { "width", 50, 400 }, height = { "height", 4, 40 }, bgalpha = { "bgAlpha", 0, 1 },
+    prdtickwidth = { "prdTickWidth", 1, 8 } }
 local settingObjs, category = {}, nil
 local InitSettings
 
@@ -148,13 +153,8 @@ local bar, ticks = nil, {}
 -- Personal Resource Display: on Forever its AlternatePowerBar is the mana row whenever the main bar is not mana (Cat and
 -- Bear Form; Blizzard_PersonalResourceDisplay Camelot override). Our ticks live on our own child frame of that row.
 local prdBar, prdHost, prdTicks = nil, nil, {}
--- PRD tick art (Blizzard_PersonalResourceDisplay.xml: the bars use the Cooldown Manager atlases). Border: a slice of the
--- bar's frame art. Blizzard anchors that art (-2,+3)/(+6,-7) around the bar, so on its 132x19 atlas a 124x9 bar sits at
--- columns 2..126, rows 3..12; the slice is the left bevel (columns 0..2) over the bar's rows. Coordinates come from
--- C_Texture.GetAtlasInfo, so no sheet size is assumed. Not yet seen in game: PRD_SLICE_X0/X1 are the numbers to nudge.
-local PRD_BG, PRD_PIP = "UI-HUD-CoolDownManager-Bar-BG", "UI-HUD-CoolDownManager-Bar-Pip"
-local PRD_ATLAS_W, PRD_ATLAS_H = 132, 19
-local PRD_SLICE_X0, PRD_SLICE_X1, PRD_SLICE_Y0, PRD_SLICE_Y1 = 0, 2, 3, 12
+-- PRD pip: Blizzard's Cooldown Manager bar marker (Blizzard_CooldownViewer), greyed and tinted with the tick colour.
+local PRD_PIP = "UI-HUD-CoolDownManager-Bar-Pip"
 local PIP_W, PIP_H = 10, 23 -- the pip atlas's aspect (UI-HUD-CoolDownManager-Bar-Pip)
 local barAtlas
 local overlay, barArt, barBg -- overlay: label host above the bar (outside the masked fill); art/bg: our own textures
@@ -193,29 +193,28 @@ local function Style(fs, k) -- every label gets the same font, outline and ancho
     end
 end
 
--- c: a choice value: an RGBA colour, "frame" (player frame border slice), "border" (PRD border slice) or "pip".
+-- c: an RGBA colour, "frame" (player frame border slice) or "prd" (the PRD's own shape, colour and width).
+-- Returns the tick's width so the caller can centre it.
 local function TickLook(t, h, frameArt, c)
     if c == "frame" and not frameArt then c = CHOICES.tickColor[1][3] end -- no player frame art to cut here: white
-    if c == "border" then
-        local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(PRD_BG)
-        if info then
-            local l, r, top, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
-            t.core:SetTexture(info.file)
-            t.core:SetTexCoord(l + (r - l) * PRD_SLICE_X0 / PRD_ATLAS_W, l + (r - l) * PRD_SLICE_X1 / PRD_ATLAS_W,
-                top + (b - top) * PRD_SLICE_Y0 / PRD_ATLAS_H, top + (b - top) * PRD_SLICE_Y1 / PRD_ATLAS_H)
-            t.core:SetSize(PRD_SLICE_X1 - PRD_SLICE_X0, h)
-            t.core:SetDesaturated(false)
-            t.core:SetVertexColor(1, 1, 1)
-            return
+    if c == "prd" then
+        local rgb = (CHOICES.prdTickColor[Opt("prdTickColor")] or CHOICES.prdTickColor[1])[3]
+        if Opt("prdTickShape") == 2 then
+            local pw = h * PIP_W / PIP_H
+            t.core:SetAtlas(PRD_PIP)
+            t.core:SetSize(pw, h)
+            t.core:SetDesaturated(true)
+            t.core:SetVertexColor(rgb[1], rgb[2], rgb[3])
+            return pw
         end
-        c = CHOICES.tickColor[1][3] -- atlas unknown on this client: white
-    end
-    if c == "pip" then
-        t.core:SetAtlas(PRD_PIP)
-        t.core:SetSize(h * PIP_W / PIP_H, h)
+        c = rgb
+        local tw = Opt("prdTickWidth")
+        t.core:SetColorTexture(c[1], c[2], c[3], c[4])
+        t.core:SetTexCoord(0, 1, 0, 1)
         t.core:SetDesaturated(false)
         t.core:SetVertexColor(1, 1, 1)
-        return
+        t.core:SetSize(tw, h)
+        return tw
     end
     if c == "frame" then
         local x0 = ATLAS_L + TICK_FRAME_X
@@ -225,13 +224,14 @@ local function TickLook(t, h, frameArt, c)
         t.core:SetSize(TICK_FRAME_W, BAR_H)
         t.core:SetDesaturated(frameDesat)
         t.core:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
-        return
+        return TICK_FRAME_W
     end
     t.core:SetColorTexture(c[1], c[2], c[3], c[4])
     t.core:SetTexCoord(0, 1, 0, 1)
     t.core:SetDesaturated(false)
     t.core:SetVertexColor(1, 1, 1)
     t.core:SetSize(2, h)
+    return 2
 end
 
 -- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
@@ -244,8 +244,8 @@ local function PlaceTicks(host, list, show, w, h, frameArt, look)
                 t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2) }
                 list[i] = t
             end
-            TickLook(t, h, frameArt, look)
-            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - 1, 0)
+            local tw = TickLook(t, h, frameArt, look)
+            t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - tw / 2, 0)
             t.core:Show()
         elseif t then
             t.core:Hide()
@@ -261,8 +261,7 @@ local function LayoutTicks()
     if prdHost then
         local w, h = prdBar:GetWidth(), prdBar:GetHeight()
         if isSecret(w) or isSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 then w, h, ok = 0, 0, false end
-        local style = CHOICES.prdTickStyle[Opt("prdTickStyle")] or CHOICES.prdTickStyle[DEFAULTS.prdTickStyle]
-        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false, style[3])
+        PlaceTicks(prdHost, prdTicks, Opt("prdTicks") and ok, w, h, false, "prd")
     end
 end
 
@@ -702,7 +701,7 @@ InitSettings = function()
             (m and MODE_DEFAULTS[m] or DEFAULTS)[key])
         st:SetValueChangedCallback(function(_, v)
             Apply()
-            if key == "mode" or key == "placement" then Repair() end
+            if key == "mode" or key == "placement" or key == "prdTickShape" then Repair() end
             if boxes[var] and type(v) == "number" then boxes[var]:SetText(Fmt(v)) end -- slider/CLI -> box
         end)
         settingObjs[var] = st
@@ -744,23 +743,31 @@ InitSettings = function()
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("General",
         "What the addon shows. These apply to every display mode."))
-    choice(nil, "mode", "Display", "Bar: a mana bar with cast ticks. Placement (in Style) puts it on the player frame "
+    choice(nil, "mode", "Display", "Bar: a mana bar with cast ticks. Placement (in Bar Style) puts it on the player frame "
         .. "or floating. Changes in combat wait until combat ends.")
     check(nil, "catOnly", "Show only in Cat Form", "Hide the display (every mode) outside Cat Form.")
-    check(nil, "prdTicks", "Personal Resource Display: cast ticks", "A tick at every multiple of the Shifting Power cost "
-        .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode.")
-    choice(nil, "prdTickStyle", "Personal Resource Display: tick style", "Border: a slice of the Personal Resource "
-        .. "Display bar's own frame art. Pip: Blizzard's Cooldown Manager marker. White, black and yellow: a plain line "
-        .. "in that colour.")
     check(nil, "locked", "Lock position"):AddShownPredicate(Floats)
     local reset = CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
         "Put the frame back at its default spot", true)
     reset:AddShownPredicate(Floats)
     layout:AddInitializer(reset)
 
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Style",
-        "How the selected display looks. Switch Display above to style another mode."))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Personal Resource Display",
+        "Cast ticks on the Personal Resource Display's mana row (shown in Cat and Bear Form), in every display mode."))
+    check(nil, "prdTicks", "Cast ticks", "A tick at every multiple of the Shifting Power cost on the Personal "
+        .. "Resource Display's mana row.")
+    choice(nil, "prdTickShape", "Tick shape", "Bar: a plain line. Pip: Blizzard's Cooldown Manager marker.")
+    choice(nil, "prdTickColor", "Tick colour")
+    slider(nil, "prdTickWidth", "Tick width", 1, 8, 1, "Width of the bar shape, in pixels."):AddShownPredicate(function()
+        return Opt("prdTickShape") == 1
+    end)
+
+    local STYLE_HEADER = { "Icon Style", "Number Style", "Bar Style" }
     for m = 1, 3 do
+        local header = CreateSettingsListSectionHeaderInitializer(STYLE_HEADER[m],
+            "How this display looks. Switch Display above to style another mode.")
+        header:AddShownPredicate(ModeShown(m))
+        layout:AddInitializer(header)
         local function row(init, p) -- shown only for mode m (and bar placement p)
             init:AddShownPredicate(ModeShown(m))
             if p then init:AddShownPredicate(PlacementShown(p)) end
@@ -821,7 +828,7 @@ f:SetScript("OnEvent", function(_, event)
             if type(db.dark) == "boolean" then db.barStyle = db.dark and STYLE_DARK or STYLE_NORMAL
             elseif C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("DarkMode") then db.barStyle = STYLE_MATCH end
         end
-        db.dark = nil
+        db.dark, db.prdTickStyle = nil, nil -- prdTickStyle: an unreleased test build's key
         Migrate(db)
         for k, v in pairs(DEFAULTS) do
             if db[k] == nil then db[k] = v end

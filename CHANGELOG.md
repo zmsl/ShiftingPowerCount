@@ -9,8 +9,9 @@
   says which mode it changed.
 - Cast ticks on the Personal Resource Display's mana row (Cat and Bear Form), on by default in every display mode;
   `/spcount prdticks on|off` or the panel checkbox.
-- Personal Resource Display tick style: Border (default; a slice of that bar's own frame art), Pip, or a plain
-  colour; `/spcount prdtickstyle`.
+- Personal Resource Display ticks have their own section: shape Bar (width 1-8 px, default 2) or Pip (Blizzard's
+  Cooldown Manager marker), and a colour; `/spcount prdtickshape|prdtickcolor|prdtickwidth`.
+- The style section is titled after the selected Display: Icon Style, Number Style or Bar Style.
 
 ## v1.0.0
 - First CurseForge release: live count of the Shifting Powers your mana pays for, in combat with secret mana; icon,

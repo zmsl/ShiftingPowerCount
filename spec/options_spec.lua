@@ -462,8 +462,7 @@ describe("ticks on the Personal Resource Display mana row", function()
         assert.equal(4, #xs(w.prdHost))
         assert.is_table(w.settings.controls.prdTicks)
         slash("tickcolor yellow")
-        assert.equal(6704514, cores(w.prdHost)[1].texture) -- still the PRD tick style's Border slice
-        assert.is_nil(rawget(cores(w.prdHost)[1], "color4"))
+        assert.same({ 1, 1, 1, 0.9 }, cores(w.prdHost)[1].color4) -- still the PRD's own colour (White)
     end)
     it("hidden outside Cat Form with the rest of the display; no PRD, no error", function()
         local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
@@ -486,11 +485,21 @@ describe("General and Style page", function()
         return r
     end
 
-    it("has a General then a Style header, each with a tooltip", function()
+    it("has General, Personal Resource Display, then one Style header per mode, each with a tooltip", function()
         local w = start({})
-        assert.same({ "General", "Style" }, { w.settings.headers[1].header, w.settings.headers[2].header })
-        assert.equal(2, #w.settings.headers)
-        for _, h in ipairs(w.settings.headers) do assert.is_true(#h.tooltip > 0) end
+        local names = {}
+        for i, h in ipairs(w.settings.headers) do names[i] = h.header; assert.is_true(#h.tooltip > 0) end
+        assert.same({ "General", "Personal Resource Display", "Icon Style", "Number Style", "Bar Style" }, names)
+        local function visible()
+            local r = {}
+            for _, h in ipairs(w.settings.headers) do if h:IsShown() then r[#r + 1] = h.header end end
+            return r
+        end
+        assert.same({ "General", "Personal Resource Display", "Icon Style" }, visible())
+        slash("mode text")
+        assert.same({ "General", "Personal Resource Display", "Number Style" }, visible())
+        slash("mode bar")
+        assert.same({ "General", "Personal Resource Display", "Bar Style" }, visible())
     end)
     it("shows General rows in every mode", function()
         local w = start({})
@@ -601,52 +610,66 @@ describe("General and Style page", function()
     end)
 end)
 
-describe("Personal Resource Display tick style", function()
+describe("Personal Resource Display ticks: shape, colour, width", function()
     local function shown(host)
         local r = {}
         for _, t in ipairs(rawget(host, "textures") or {}) do
-            if rawget(t, "size") and not rawget(t, "hidden") and (rawget(t, "texture") or rawget(t, "atlas") or rawget(t, "color4")) then
-                r[#r + 1] = t
-            end
+            if rawget(t, "size") and not rawget(t, "hidden") then r[#r + 1] = t end
         end
         return r
     end
     local function near(a, b) return math.abs(a - b) < 1e-9 end
+    local function prd() return start({ cost = 400, max = 2000, prd = { 200, 10 } }) end
 
-    it("defaults to Border: a 2px slice of the PRD bar's border art at the row's height, no edges", function()
-        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
-        assert.equal(4, ShiftingPowerCountDB.prdTickStyle)
+    it("defaults to a white 2px bar, centred on each multiple of the cost", function()
+        local w = prd()
+        local db = ShiftingPowerCountDB
+        assert.same({ 1, 1, 2 }, { db.prdTickShape, db.prdTickColor, db.prdTickWidth })
         local t = shown(w.prdHost)
-        assert.equal(4, #t) -- cores only: the 1px edges stay hidden
-        assert.equal(6704514, t[1].texture)
+        assert.equal(4, #t)
         assert.same({ 2, 10 }, t[1].size)
-        local c = t[1].texcoord -- atlas columns 0..2 of 132, rows 3..12 of 19
-        for i, want in ipairs({ 0.1, 0.102, 0.03, 0.12 }) do assert.is_true(near(c[i], want), "texcoord " .. i) end
+        assert.same({ 1, 1, 1, 0.9 }, t[1].color4)
+        assert.equal(39, t[1].point[4]) -- tick at 40, 2px wide: left edge at 39
     end)
-    it("Pip uses Blizzard's Cooldown Manager pip at the row's height", function()
-        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
-        slash("prdtickstyle pip")
+    it("bar width is configurable and stays centred", function()
+        local w = prd()
+        slash("prdtickwidth 5")
+        local t = shown(w.prdHost)
+        assert.same({ 5, 10 }, t[1].size)
+        assert.equal(37.5, t[1].point[4])
+        slash("prdtickwidth 20")
+        assert.equal(8, ShiftingPowerCountDB.prdTickWidth) -- clamped to 1-8
+    end)
+    it("pip: Blizzard's Cooldown Manager pip at the row's height, greyed and tinted with the colour, centred", function()
+        local w = prd()
+        slash("prdtickshape pip"); slash("prdtickcolor cyan")
         local t = shown(w.prdHost)
         assert.equal(4, #t)
         assert.equal("UI-HUD-CoolDownManager-Bar-Pip", t[1].atlas)
+        assert.is_true(t[1].desat)
+        assert.same({ 0.3, 0.9, 1 }, t[1].vertex)
         assert.is_true(near(t[1].size[1], 100 / 23) and t[1].size[2] == 10)
+        assert.is_true(near(t[1].point[4], 40 - 50 / 23))
     end)
-    it("colour styles are plain 2px lines, no edges; the bar's tick colour no longer drives the PRD", function()
-        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
-        slash("prdtickstyle black")
-        slash("mode bar"); slash("tickcolor yellow")
+    it("colour applies to the bar shape; back from pip to bar is a plain line again", function()
+        local w = prd()
+        slash("prdtickshape pip"); slash("prdtickcolor black"); slash("prdtickshape bar")
         local t = shown(w.prdHost)
-        assert.equal(4, #t) -- one line per tick, nothing beside it
-        assert.same({ 2, 10 }, t[1].size)
         assert.same({ 0, 0, 0, 0.9 }, t[1].color4)
-        assert.equal(4, #rawget(w.prdHost, "textures")) -- no edge textures exist at all
-        assert.is_table(w.settings.controls.SPC_PRDTICKSTYLE)
-    end)
-    it("switching back from Pip to Border clears the atlas look", function()
-        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
-        slash("prdtickstyle pip"); slash("prdtickstyle border")
-        local t = shown(w.prdHost)
-        assert.equal(6704514, t[1].texture)
+        assert.is_false(t[1].desat)
+        assert.same({ 1, 1, 1 }, t[1].vertex)
         assert.same({ 2, 10 }, t[1].size)
+    end)
+    it("panel: shape, colour and width rows; width shows only for the bar shape", function()
+        local w = prd()
+        local c = w.settings.controls
+        for _, var in ipairs({ "SPC_PRDTICKS", "SPC_PRDTICKSHAPE", "SPC_PRDTICKCOLOR", "SPC_PRDTICKWIDTH" }) do
+            assert.is_table(c[var], var)
+        end
+        assert.is_true(c.SPC_PRDTICKWIDTH.init:IsShown())
+        local before = w.settings.repairs
+        w.settings.settings.SPC_PRDTICKSHAPE:SetValue(2)
+        assert.is_false(c.SPC_PRDTICKWIDTH.init:IsShown())
+        assert.is_true(w.settings.repairs > before) -- the open panel redraws
     end)
 end)
