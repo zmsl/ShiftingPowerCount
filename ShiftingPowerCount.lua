@@ -206,8 +206,7 @@ local function TickLook(t, h, frameArt, c)
             t.core:SetSize(PRD_SLICE_X1 - PRD_SLICE_X0, h)
             t.core:SetDesaturated(false)
             t.core:SetVertexColor(1, 1, 1)
-            t.l:Hide(); t.r:Hide()
-            return false
+            return
         end
         c = CHOICES.tickColor[1][3] -- atlas unknown on this client: white
     end
@@ -216,8 +215,7 @@ local function TickLook(t, h, frameArt, c)
         t.core:SetSize(h * PIP_W / PIP_H, h)
         t.core:SetDesaturated(false)
         t.core:SetVertexColor(1, 1, 1)
-        t.l:Hide(); t.r:Hide()
-        return false
+        return
     end
     if c == "frame" then
         local x0 = ATLAS_L + TICK_FRAME_X
@@ -227,20 +225,13 @@ local function TickLook(t, h, frameArt, c)
         t.core:SetSize(TICK_FRAME_W, BAR_H)
         t.core:SetDesaturated(frameDesat)
         t.core:SetVertexColor(frameRGB[1], frameRGB[2], frameRGB[3])
-        t.l:Hide(); t.r:Hide()
-        return false
+        return
     end
-    local edge = c[1] == 0 and 1 or 0 -- black ticks get light edges, the others dark ones
     t.core:SetColorTexture(c[1], c[2], c[3], c[4])
     t.core:SetTexCoord(0, 1, 0, 1)
     t.core:SetDesaturated(false)
     t.core:SetVertexColor(1, 1, 1)
     t.core:SetSize(2, h)
-    t.l:SetSize(1, h)
-    t.r:SetSize(1, h)
-    t.l:SetColorTexture(edge, edge, edge, 0.8)
-    t.r:SetColorTexture(edge, edge, edge, 0.8)
-    return true
 end
 
 -- One tick per Shifting Power cost on a host w x h: the segments are casts. Plain out-of-combat numbers.
@@ -249,19 +240,15 @@ local function PlaceTicks(host, list, show, w, h, frameArt, look)
         local x = show and (i * cost / maxMana * w) -- only divides when show (maxMana > 0)
         local t = list[i]
         if x and x < w - 0.5 then
-            if not t then -- a 2px core with a 1px edge on each side, full row height
-                t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2), l = host:CreateTexture(nil, "OVERLAY", nil, 1),
-                    r = host:CreateTexture(nil, "OVERLAY", nil, 1) }
+            if not t then -- one texture per tick, full row height
+                t = { core = host:CreateTexture(nil, "OVERLAY", nil, 2) }
                 list[i] = t
             end
-            local edges = TickLook(t, h, frameArt, look)
+            TickLook(t, h, frameArt, look)
             t.core:ClearAllPoints(); t.core:SetPoint("LEFT", host, "LEFT", x - 1, 0)
-            t.l:ClearAllPoints(); t.l:SetPoint("RIGHT", t.core, "LEFT", 0, 0)
-            t.r:ClearAllPoints(); t.r:SetPoint("LEFT", t.core, "RIGHT", 0, 0)
             t.core:Show()
-            if edges then t.l:Show(); t.r:Show() end
         elseif t then
-            t.core:Hide(); t.l:Hide(); t.r:Hide()
+            t.core:Hide()
         end
     end
 end
@@ -763,8 +750,8 @@ InitSettings = function()
     check(nil, "prdTicks", "Personal Resource Display: cast ticks", "A tick at every multiple of the Shifting Power cost "
         .. "on the Personal Resource Display's mana row (Cat and Bear Form), in every display mode.")
     choice(nil, "prdTickStyle", "Personal Resource Display: tick style", "Border: a slice of the Personal Resource "
-        .. "Display bar's own frame art. Pip: Blizzard's Cooldown Manager marker. White, black and yellow ticks have a "
-        .. "1px edge on both sides.")
+        .. "Display bar's own frame art. Pip: Blizzard's Cooldown Manager marker. White, black and yellow: a plain line "
+        .. "in that colour.")
     check(nil, "locked", "Lock position"):AddShownPredicate(Floats)
     local reset = CreateSettingsButtonInitializer("Position", "Reset position", ResetPos,
         "Put the frame back at its default spot", true)
@@ -788,7 +775,7 @@ InitSettings = function()
         if m == 1 then row(slider(m, "iconAlpha", "Icon opacity", 0, 1, 0.05)) end
         if m == 3 then
             row(check(m, "ticks", "Show cast ticks", "A tick at every multiple of the Shifting Power cost, so each segment is one cast."))
-            row(choice(m, "tickColor", "Tick colour", "Tick colour. White, black and yellow ticks have a 1px edge on both sides. "
+            row(choice(m, "tickColor", "Tick colour", "Tick colour. White, black and yellow: a plain line in that colour. "
                 .. "Frame (On player frame only): a slice of the player frame's own border art, greyed and tinted like it "
                 .. "(for example by DarkMode), no edges.", tickChoices))
             row(check(m, "barText", "Show count", "Show the number of casts on the bar."))

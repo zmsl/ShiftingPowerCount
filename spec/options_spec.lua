@@ -201,21 +201,19 @@ describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
         return cores, edges
     end
 
-    it("ticks are 2px wide, full height, white 0.9 with dark 1px edges; the colour is a preset", function()
+    it("ticks are plain 2px lines, full height, in the chosen colour, no edges; the colour is a preset", function()
         local w = start({ cost = 400, max = 2000 })
         slash("mode bar")
         local cores, edges = parts(w.bar)
         assert.equal(4, #cores)
-        assert.equal(8, #edges)
+        assert.equal(0, #edges)
         assert.same({ 2, 9 }, cores[1].size)
         assert.same({ 1, 1, 1, 0.9 }, cores[1].color4)
-        assert.same({ 1, 9 }, edges[1].size)
-        assert.same({ 0, 0, 0, 0.8 }, edges[1].color4)
         slash("tickcolor yellow")
         assert.same({ 1, 0.9, 0.2, 0.9 }, cores[1].color4)
         slash("tickcolor black")
-        assert.same({ 0, 0, 0, 0.9 }, cores[1].color4)
-        assert.same({ 1, 1, 1, 0.8 }, edges[1].color4) -- light edges so black ticks read on a dark fill
+        assert.same({ 0, 0, 0, 0.9 }, cores[1].color4) -- just black: no light outline
+        assert.equal(0, #select(2, parts(w.bar)))
         assert.is_table(w.settings.controls.tickColor)
     end)
     it("tick colour Frame cuts the frame art's border slice, mirrors DarkMode, follows hooks, white restores", function()
@@ -244,8 +242,7 @@ describe("bar polish: dark mode, ticks, text overlay, Cat Form", function()
         assert.is_false(ticks[1].desat)
         assert.same({ 0, 1, 0, 1 }, ticks[1].texcoord)
         assert.is_false(ticks[1].hidden)
-        local _, e2 = parts(w.bar)
-        assert.is_false(e2[1].hidden)
+        assert.equal(0, #select(2, parts(w.bar))) -- white is a plain line: no edges come back
         assert.equal(2, rawget(frame, "vwrites")) -- only this test's own writes
         assert.is_nil(rawget(w.playerFrame, "vertex"))
     end)
@@ -634,15 +631,15 @@ describe("Personal Resource Display tick style", function()
         assert.equal("UI-HUD-CoolDownManager-Bar-Pip", t[1].atlas)
         assert.is_true(near(t[1].size[1], 100 / 23) and t[1].size[2] == 10)
     end)
-    it("colour styles keep 2px cores with edges; the bar's tick colour no longer drives the PRD", function()
+    it("colour styles are plain 2px lines, no edges; the bar's tick colour no longer drives the PRD", function()
         local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
-        slash("prdtickstyle yellow")
-        slash("mode bar"); slash("tickcolor black")
+        slash("prdtickstyle black")
+        slash("mode bar"); slash("tickcolor yellow")
         local t = shown(w.prdHost)
-        assert.equal(12, #t) -- 4 cores + 8 edges
-        local cores = {}
-        for _, x in ipairs(t) do if x.size[1] == 2 then cores[#cores + 1] = x end end
-        assert.same({ 1, 0.9, 0.2, 0.9 }, cores[1].color4)
+        assert.equal(4, #t) -- one line per tick, nothing beside it
+        assert.same({ 2, 10 }, t[1].size)
+        assert.same({ 0, 0, 0, 0.9 }, t[1].color4)
+        assert.equal(4, #rawget(w.prdHost, "textures")) -- no edge textures exist at all
         assert.is_table(w.settings.controls.SPC_PRDTICKSTYLE)
     end)
     it("switching back from Pip to Border clears the atlas look", function()
