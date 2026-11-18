@@ -149,3 +149,27 @@ with the `.pkgmeta` externals mechanism or committed; builder's call, but the Cu
 - Whether panel dropdowns for fonts/textures list LibSharedMedia's entries at panel build time (acceptable) or rebuild
   on open.
 - Spec coverage: migration, shown predicates per mode/placement, floating bar ticks/value/fallback, CLI per-mode routing.
+
+## Calls made after the builder check (2026-11-18)
+
+Marked as the designer's calls, not owner decisions; the owner reviews them with this document.
+
+1. **Bar placements share one style.** On player frame and Floating both read `bar.*` (font, size, outline, colour,
+   0-in-red, ticks, tick colour, show count): Placement is a sub-choice of one mode. Label hosts and pools are left to
+   the builder.
+2. **The 14 cap is applied at render time, on the player-frame row only.** The stored `bar.fontSize` is never clamped,
+   so a migrated 20 shows as 14 on the row (as today) and as 20 on the floating bar. Bar mode has no `scale` on
+   purpose: the floating bar is sized by width and height. Migration maps the v1.0.0 font index to a name:
+   1 Friz Quadrata, 2 Arial Narrow, 3 Morpheus, 4 Skurri.
+3. **Missing LibSharedMedia names** (a media pack uninstalled): render with LibSharedMedia's default font/statusbar for
+   that type, keep the stored name (so it comes back when the pack returns). The dropdown lists what is registered at
+   panel build time; a stored name not in it shows as LibSharedMedia's default.
+4. **Unknown max mana:** as today: no labels shown until the first out-of-combat rebuild; the floating bar shows empty
+   (min/max 0..1) and no ticks. `PlaceTicks(host, list, show, w, h, frameArt)` already takes width and height (PR #3).
+5. **Downgrade to v1.0.0 and back:** accepted risk; flat keys v1.0.0 writes are ignored once `schema` is 1.
+6. **Reset position** acts on the frame the current mode shows (icon/number frame, or floating bar). The panel button
+   and `Lock position` are hidden while Display = Bar and Placement = On player frame (nothing to move).
+7. **Libraries are committed** under `Libs/` (no `.pkgmeta` externals), so a dev checkout and CI have them; specs stub
+   `LibStub("LibSharedMedia-3.0")` in `spec/fake.lua` (Fetch/List/HashTable) rather than loading the real library.
+8. **Shown predicates read `ShiftingPowerCountDB`** (`mode`, `bar.placement`) directly; the Display and Placement
+   callbacks call `SettingsInbound.RepairDisplay()` behind a nil-guard.
