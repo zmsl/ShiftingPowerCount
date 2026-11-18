@@ -516,7 +516,8 @@ describe("General and Style page", function()
         assert.same({}, rows(w, "ICON"))
         assert.is_true(w.settings.repairs > before)
         slash("mode bar")
-        assert.same({ "BARCOLOR", "BARSTYLE", "BARTEXT", "COLOR", "FONT", "FONTSIZE", "OUTLINE", "PLACEMENT", "TICKCOLOR", "TICKS", "ZERORED" },
+        assert.same({ "BARCOLOR", "BARSTYLE", "BARTEXT", "COLOR", "FONT", "FONTSIZE", "OUTLINE", "PLACEMENT", "TICKCOLOR", "TICKS", "TICKSHAPE", "TICKWIDTH",
+            "ZERORED" },
             rows(w, "BAR"))
     end)
     it("Number position belongs to Icon and number only", function()
@@ -690,5 +691,74 @@ describe("Personal Resource Display ticks: shape, colour, width", function()
         w.settings.settings.SPC_PRDTICKSHAPE:SetValue(2)
         assert.is_false(c.SPC_PRDTICKWIDTH.init:IsShown())
         assert.is_true(w.settings.repairs > before) -- the open panel redraws
+    end)
+end)
+
+describe("tick shapes: Frame (the XP bar's divider), Bar, Pip, on the PRD and the bar", function()
+    local function shown(host)
+        local r = {}
+        for _, t in ipairs(rawget(host, "textures") or {}) do
+            if rawget(t, "size") and not rawget(t, "hidden") then r[#r + 1] = t end
+        end
+        return r
+    end
+    local function near(a, b) return math.abs(a - b) < 1e-9 end
+    local DIVIDER = "ui-hud-experiencebar-divider"
+    local function shownVar(w, var) return w.settings.controls[var].init:IsShown() end
+
+    it("PRD Frame: the XP bar divider, 3px at the row's height, untinted, centred; colour and width rows hidden", function()
+        local w = start({ cost = 400, max = 2000, prd = { 200, 10 } })
+        slash("prdtickshape frame")
+        assert.equal(3, ShiftingPowerCountDB.prdTickShape)
+        local t = shown(w.prdHost)
+        assert.equal(4, #t)
+        assert.equal(DIVIDER, t[1].atlas)
+        assert.same({ 3, 10 }, t[1].size)
+        assert.is_false(t[1].desat)
+        assert.same({ 1, 1, 1 }, t[1].vertex)
+        assert.is_true(near(t[1].point[4], 40 - 1.5))
+        assert.is_false(shownVar(w, "SPC_PRDTICKCOLOR"))
+        assert.is_false(shownVar(w, "SPC_PRDTICKWIDTH"))
+        slash("prdtickshape pip")
+        assert.is_true(shownVar(w, "SPC_PRDTICKCOLOR"))
+    end)
+    it("the shape dropdowns list Frame, Bar, Pip; stored values stay 1 Bar, 2 Pip, 3 Frame", function()
+        local w = start({})
+        for _, var in ipairs({ "SPC_PRDTICKSHAPE", "SPC_BAR_TICKSHAPE" }) do
+            local o = w.settings.controls[var].opts
+            assert.same({ "Frame", "Bar", "Pip" }, { o[1].label, o[2].label, o[3].label }, var)
+            assert.same({ 3, 1, 2 }, { o[1].value, o[2].value, o[3].value }, var)
+        end
+    end)
+    it("bar ticks: shape Frame / Pip / Bar with colour and width, on the player-frame bar", function()
+        local w = start({ cost = 400, max = 2000 })
+        slash("mode bar")
+        assert.same({ 1, 2 }, { ShiftingPowerCountDB.bar.tickShape, ShiftingPowerCountDB.bar.tickWidth })
+        slash("tickshape frame")
+        local t = shown(w.bar)
+        assert.equal(DIVIDER, t[#t].atlas)
+        assert.same({ 3, 9 }, t[#t].size)
+        assert.is_false(shownVar(w, "SPC_BAR_TICKCOLOR"))
+        slash("tickshape pip")
+        t = shown(w.bar)
+        assert.equal("UI-HUD-CoolDownManager-Bar-Pip", t[#t].atlas)
+        assert.is_true(t[#t].desat)
+        assert.same({ 0, 0, 0 }, t[#t].vertex) -- the tick colour (black)
+        assert.is_true(shownVar(w, "SPC_BAR_TICKCOLOR"))
+        assert.is_false(shownVar(w, "SPC_BAR_TICKWIDTH"))
+        slash("tickshape bar"); slash("tickwidth 4")
+        t = shown(w.bar)
+        local core
+        for _, x in ipairs(t) do if rawget(x, "color4") and x.size[2] == 9 then core = x end end
+        assert.same({ 4, 9 }, core.size)
+        assert.same({ 0, 0, 0, 1 }, core.color4)
+        assert.is_true(shownVar(w, "SPC_BAR_TICKWIDTH"))
+    end)
+    it("bar tick shape applies to the floating bar too", function()
+        local w = start({ cost = 400, max = 2000 })
+        slash("mode bar"); slash("placement floating"); slash("tickshape frame")
+        local found = 0
+        for _, x in ipairs(w.floatBar.textures) do if rawget(x, "atlas") == DIVIDER and not rawget(x, "hidden") then found = found + 1 end end
+        assert.equal(4, found)
     end)
 end)
